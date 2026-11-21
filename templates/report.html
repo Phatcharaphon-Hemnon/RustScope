@@ -1,13 +1,21 @@
 {% extends "base.html" %}
 {% block title %}รายงาน {{ scan.release }} · RustScope{% endblock %}
+{% block refresh %}{% if pending %}<meta http-equiv="refresh" content="4">{% endif %}{% endblock %}
 {% block content %}
 <nav class="no-print"><a href="/p/{{ p.id }}">กลับไปยังโปรเจกต์</a>{% if !pending %} · <a href="#results">ผลตรวจ</a> · <a href="#compare">ตรวจซ้ำ</a> · <a href="#reviews">การทบทวน</a> · <a href="#catalog">ทะเบียนกฎ</a>{% endif %}</nav>
 <article data-status="{{ scan.status }}">
+{% if pending %}
+<section class="panel waiting" role="status" aria-live="polite">
+<h1>{% if scan.status == "running" %}กำลังตรวจสอบ{% else %}รอคิวตรวจ{% endif %}</h1>
+<p>{{ p.name }} · {{ scan.release }}</p>
+<progress aria-label="กำลังประมวลผล"></progress>
+<p class="hint">ผลจะแสดงเมื่อการตรวจเสร็จ</p>
+<a href="/p/{{ p.id }}/s/{{ scan.id }}">เช็กสถานะตอนนี้</a>
+</section>
+{% else %}
 <h1>รายงานการตรวจประเมิน</h1>
 <p class="subtitle">{{ p.name }} · {{ scan.release }}</p>
-<section class="panel">
-<h2>ขอบเขตและข้อมูลรอบตรวจ</h2>
-<dl>
+<details class="panel"><summary>ข้อมูลรอบตรวจ</summary><dl>
 {% if p.demo %}<dt>โหมด</dt><dd>สาธิตออฟไลน์ด้วยข้อมูลจำลอง</dd>{% endif %}
 <dt>รหัสโปรเจกต์</dt><dd><code>{{ p.id }}</code></dd>
 <dt>รหัสรอบตรวจ</dt><dd><code>{{ scan.id }}</code></dd>
@@ -23,18 +31,11 @@
 <dt>ฟอร์มที่คาดว่าจะพบ</dt><dd>{% if scan.policy.expected_form.is_some() %}ระบุ HTML id แล้ว{% else %}ไม่กำหนด{% endif %}</dd>
 <dt>ต้องใช้ SRI</dt><dd>{% if scan.policy.sri %}ใช่{% else %}ไม่ใช่{% endif %}</dd>
 </dl>
-{% if pending %}
-{% if scan.status == "running" %}<progress aria-label="กำลังรวบรวมหลักฐาน"></progress>{% else %}<p role="status">ระบบจะเริ่มตรวจเมื่อถึงคิวของรอบนี้</p>{% endif %}
-<p><a href="/p/{{ p.id }}/s/{{ scan.id }}">โหลดสถานะล่าสุด</a></p>
-{% else %}
-<p>ผลครอบคลุมคำขอ HTTP แบบอ่านอย่างเดียวและ HTML ที่เซิร์ฟเวอร์ส่ง รายการสคริปต์อ้างอิง URL ที่ประกาศในเอกสาร การตรวจ SRI ประเมินรูปแบบของแอตทริบิวต์ ส่วน Cargo.lock ประเมินแพ็กเกจที่รองรับเทียบกับประกาศออฟไลน์</p>
-<p class="no-print">พิมพ์หรือบันทึก PDF ผ่านเมนูพิมพ์ของเบราว์เซอร์ (Ctrl+P หรือ ⌘P)</p>
+</details>
 {% endif %}
-</section>
 {% if !pending %}
 <section class="panel">
 <h2>ความครอบคลุม</h2>
-<p>นับแต่ละกฎครั้งเดียว ประเมินได้เมื่อมีผลพบตามกฎ ต้องทบทวน หรือผ่านเฉพาะกฎ สำหรับ E ใช้คำวินิจฉัยจากผู้ทบทวนในรอบนี้</p>
 <p><strong>ประเมินได้ {{ assessed_total }} / {{ rules.len() }} กฎ</strong></p>
 <table>
 <thead><tr><th scope="col">วิธี</th><th scope="col">กฎที่ประเมินได้ / ทั้งหมด</th><th scope="col">กฎอัตโนมัติที่มีผลบันทึก</th></tr></thead>

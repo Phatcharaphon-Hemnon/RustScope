@@ -49,7 +49,7 @@
     {% else %}
     <label>URL เป้าหมาย <input name="target" type="url" maxlength="2048" value="{{ p.base }}" required></label>
     {% endif %}
-    <fieldset>
+    <details><summary>ตั้งค่าขั้นสูงและแนบ Cargo.lock</summary><fieldset>
       <legend>นโยบายและหลักฐานประกอบ</legend>
       <label class="check"><input name="download" type="checkbox"{% if p.demo %} checked{% endif %}> เป้าหมายเป็นไฟล์ดาวน์โหลด (A02-01)</label>
       <label>อายุ HSTS ขั้นต่ำ (วินาที, A02-02) <input name="hsts_min" type="number" min="0"{% if p.demo %} value="3600"{% endif %}></label>
@@ -57,24 +57,23 @@
       <label class="check"><input name="sri" type="checkbox"{% if p.demo %} checked{% endif %}> ต้องใช้ SRI สำหรับสคริปต์ภายนอก (A08-04)</label>
       <label>เนื้อหา Cargo.lock (สูงสุด 256 KiB, A03-01/02) <textarea name="lock" rows="4" spellcheck="false"></textarea></label>
       {% if p.demo %}<p class="hint">ถ้าเว้น Cargo.lock ว่าง ระบบใช้ไฟล์สาธิต</p>{% endif %}
-    </fieldset>
-    <p class="hint">ตรวจ HTTP ที่เลือก, HTML ที่เซิร์ฟเวอร์ส่ง และ Cargo.lock ของ crates.io กฎที่มีเงื่อนไขจะใช้ตามนโยบายที่ระบุ</p>
-    <div class="actions"><button>ส่งเข้าคิวตรวจ</button> <button name="preview" value="on">ตรวจความพร้อม</button></div>
+    </fieldset></details>
+    <div class="actions"><button>เริ่มตรวจ</button> <button name="preview" value="on">ตรวจความพร้อม</button></div>
   </form>
   {% else %}<p>ต้องมีขอบเขตที่ยืนยันแล้วและยังไม่หมดอายุก่อนเริ่มรอบตรวจ</p>{% endif %}
 </section>
 {% endif %}
 </div>
 {% if owner %}
-<section class="panel">
-  <h2>กำหนดสิทธิ์ให้สมาชิก</h2>
+<details class="panel">
+  <summary>จัดการสมาชิก</summary>
   <form action="/p/{{ p.id }}/member" method="post" class="stack">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <label>ชื่อบัญชีที่มีอยู่แล้ว <input name="user" required></label>
     <label>บทบาท <select name="role"><option value="viewer">ผู้ดูรายงาน</option><option value="reviewer">ผู้ทบทวน</option></select></label>
     <button>บันทึกสิทธิ์</button>
   </form>
-</section>
+</details>
 {% endif %}
 {% include "catalog.html" %}
 {% endblock %}

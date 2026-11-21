@@ -65,3 +65,8 @@ summary + dl { margin-top: .8rem; }
 }
 #compare th[scope=row] { white-space: nowrap; }
 #compare td:last-child { width: 24%; }
+
+.waiting { min-height: 55vh; display: grid; place-content: center; justify-items: center; text-align: center; gap: .7rem; }
+.waiting h1, .waiting p { margin: 0; }
+.waiting progress { width: min(16rem, 70vw); accent-color: var(--accent); }
+.actions button[name=preview] { background: white; color: var(--accent); }
