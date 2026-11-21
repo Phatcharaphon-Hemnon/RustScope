@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}ตรวจความพร้อม · RustScope{% endblock %}
+{% block content %}
+<nav><a href="/p/{{ p.id }}">กลับไปยังโปรเจกต์</a></nav>
+<h1>ความพร้อมก่อนเริ่มตรวจ</h1>
+<p class="subtitle">{{ p.name }} · {{ scan.release }}</p>
+<section class="panel">
+  <dl>
+    <dt>เป้าหมาย</dt><dd><code>{{ target }}</code></dd>
+    <dt>สภาพแวดล้อม</dt><dd>{{ scan.environment }}</dd>
+  </dl>
+  <p>ระบบแสดงความพร้อมตามข้อมูลที่กรอก ผลกฎเว็บขึ้นอยู่กับคำตอบ HTTP และเนื้อหาที่เซิร์ฟเวอร์ส่ง</p>
+  <p>ใช้ปุ่มย้อนกลับในเบราว์เซอร์เพื่อกลับไปยังแบบฟอร์มพร้อมข้อมูลที่กรอก แล้วเลือก “ส่งเข้าคิวตรวจ”</p>
+  <table>
+    <thead><tr><th scope="col">กฎ</th><th scope="col">ความพร้อมและเงื่อนไข</th></tr></thead>
+    <tbody>
+      {% for (rule, readiness) in rows %}
+      <tr data-rule="{{ rule.id }}">
+        <th scope="row">{{ rule.id }} {{ rule.name }}</th>
+        <td>{{ readiness }}<br><span class="hint">{{ rule.applicability }}</span></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

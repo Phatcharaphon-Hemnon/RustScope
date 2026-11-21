@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block title %}รายงาน {{ scan.release }} · RustScope{% endblock %}
+{% block content %}
+<nav class="no-print"><a href="/p/{{ p.id }}">กลับไปยังโปรเจกต์</a>{% if !pending %} · <a href="#results">ผลตรวจ</a> · <a href="#compare">ตรวจซ้ำ</a> · <a href="#reviews">การทบทวน</a> · <a href="#catalog">ทะเบียนกฎ</a>{% endif %}</nav>
+<article data-status="{{ scan.status }}">
+<h1>รายงานการตรวจประเมิน</h1>
+<p class="subtitle">{{ p.name }} · {{ scan.release }}</p>
+<section class="panel">
+<h2>ขอบเขตและข้อมูลรอบตรวจ</h2>
+<dl>
+{% if p.demo %}<dt>โหมด</dt><dd>สาธิตออฟไลน์ด้วยข้อมูลจำลอง</dd>{% endif %}
+<dt>รหัสโปรเจกต์</dt><dd><code>{{ p.id }}</code></dd>
+<dt>รหัสรอบตรวจ</dt><dd><code>{{ scan.id }}</code></dd>
+<dt>สถานะ</dt><dd>{{ crate::ui::scan_status(scan.status.as_str()) }}</dd>
+<dt>เป้าหมาย</dt><dd><code>{{ target }}</code>{% if !p.demo %} · แสดงต้นทางและลายนิ้วมือของเส้นทาง{% endif %}</dd>
+<dt>สภาพแวดล้อม</dt><dd>{{ scan.environment }}</dd>
+<dt>อนุมัติ HTTPS เพิ่มสำหรับขอบเขต HTTP เดิม</dt><dd>{% if p.upgrade %}ใช่{% else %}ไม่ใช่{% endif %}</dd>
+<dt>เวลาเริ่มรอบ (Unix วินาที UTC)</dt><dd>{{ scan.at }}</dd>
+{% if scan.observed_at > 0 %}<dt>เวลาบันทึกหลักฐานเว็บ (Unix วินาที UTC)</dt><dd>{{ scan.observed_at }}</dd>{% endif %}
+<dt>รุ่นชุดกฎ</dt><dd>{{ scan.version }}</dd>
+<dt>ไฟล์ดาวน์โหลด</dt><dd>{% if scan.policy.download %}ใช่{% else %}ไม่ใช่{% endif %}</dd>
+<dt>อายุ HSTS ขั้นต่ำ</dt><dd>{% match scan.policy.hsts_min %}{% when Some with (age) %}{{ age }} วินาที{% when None %}ไม่กำหนด{% endmatch %}</dd>
+<dt>ฟอร์มที่คาดว่าจะพบ</dt><dd>{% if scan.policy.expected_form.is_some() %}ระบุ HTML id แล้ว{% else %}ไม่กำหนด{% endif %}</dd>
+<dt>ต้องใช้ SRI</dt><dd>{% if scan.policy.sri %}ใช่{% else %}ไม่ใช่{% endif %}</dd>
+</dl>
+{% if pending %}
+{% if scan.status == "running" %}<progress aria-label="กำลังรวบรวมหลักฐาน"></progress>{% else %}<p role="status">ระบบจะเริ่มตรวจเมื่อถึงคิวของรอบนี้</p>{% endif %}
+<p><a href="/p/{{ p.id }}/s/{{ scan.id }}">โหลดสถานะล่าสุด</a></p>
+{% else %}
+<p>ผลครอบคลุมคำขอ HTTP แบบอ่านอย่างเดียวและ HTML ที่เซิร์ฟเวอร์ส่ง รายการสคริปต์อ้างอิง URL ที่ประกาศในเอกสาร การตรวจ SRI ประเมินรูปแบบของแอตทริบิวต์ ส่วน Cargo.lock ประเมินแพ็กเกจที่รองรับเทียบกับประกาศออฟไลน์</p>
+<p class="no-print">พิมพ์หรือบันทึก PDF ผ่านเมนูพิมพ์ของเบราว์เซอร์ (Ctrl+P หรือ ⌘P)</p>
+{% endif %}
+</section>
+{% if !pending %}
+<section class="panel">
+<h2>ความครอบคลุม</h2>
+<p>นับแต่ละกฎครั้งเดียว ประเมินได้เมื่อมีผลพบตามกฎ ต้องทบทวน หรือผ่านเฉพาะกฎ สำหรับ E ใช้คำวินิจฉัยจากผู้ทบทวนในรอบนี้</p>
+<p><strong>ประเมินได้ {{ assessed_total }} / {{ rules.len() }} กฎ</strong></p>
+<table>
+<thead><tr><th scope="col">วิธี</th><th scope="col">กฎที่ประเมินได้ / ทั้งหมด</th><th scope="col">กฎอัตโนมัติที่มีผลบันทึก</th></tr></thead>
+<tbody>{% for row in coverage %}
+<tr><th scope="row">{{ row.method }} · {{ row.description }}</th><td>{{ row.assessed }} / {{ row.total }}</td><td>{{ row.executed }}</td></tr>
+{% endfor %}</tbody>
+</table>
+</section>
+<section id="results" class="panel">
+<h2>ผลตรวจอัตโนมัติ</h2>
+{% for (obs, rule) in observations %}
+<section class="result" data-rule="{{ rule.id }}">
+<h3>{{ rule.id }} {{ rule.name }} · {{ obs.outcome.thai() }}</h3>
+<dl>
+<dt>หมวด OWASP / รุ่นกฎ</dt><dd>{{ rule.category }} / {{ rule.version }}</dd>
+<dt>ชนิดหลักฐาน / ตำแหน่ง</dt><dd>{{ rule.inputs }} / <code>{{ obs.item }}</code></dd>
+<dt>สิ่งที่คาดและเกณฑ์ตัดสิน</dt><dd>{{ rule.evidence }}</dd>
+<dt>สิ่งที่พบและหลักฐานที่ปกปิดแล้ว</dt><dd>{{ obs.observed }}</dd>
+<dt>ผลกระทบที่อาจเกิดขึ้น</dt><dd>{{ rule.impact }}</dd>
+<dt>ความรุนแรง / ความมั่นใจของกฎ</dt><dd>{{ rule.severity }} / {{ rule.confidence }}</dd>
+<dt>วิธีแก้</dt><dd>{{ rule.remediation }}</dd>
+<dt>เกณฑ์ยืนยันการแก้ไข</dt><dd>{{ rule.closure }}</dd>
+</dl>
+</section>
+{% else %}<p>รอบนี้ไม่มีผลตรวจอัตโนมัติ</p>{% endfor %}
+</section>
+<section id="compare" class="panel">
+<h2>ผลการตรวจซ้ำ</h2>
+{% if let Some(prior) = previous %}
+<p>รอบก่อนหน้าของเป้าหมายนี้ <a href="/p/{{ p.id }}/s/{{ prior.id }}">{{ prior.release }}</a> · รอบปัจจุบัน {{ scan.release }}</p>
+{% endif %}
+<p>การยืนยันการแก้ไขต้องมีผลผ่านของรายการเดิมในโปรเจกต์ เป้าหมาย รุ่นกฎ สภาพแวดล้อม และนโยบายที่ตรงกัน</p>
+<table>
+<thead><tr><th scope="col">กฎ</th><th scope="col">รายการ</th><th scope="col">การเปลี่ยนแปลง</th></tr></thead>
+<tbody>
+{% for change in changes %}
+<tr data-rule="{{ change.rule }}" data-change="{{ "{:?}"|format(change.status) }}"><th scope="row">{{ change.rule }}</th><td>{{ change.item }}</td><td>{{ change.status.thai() }}</td></tr>
+{% else %}<tr><td colspan="3">ยังไม่มีรายการให้เปรียบเทียบในรอบนี้</td></tr>{% endfor %}
+</tbody>
+</table>
+</section>
+<section id="reviews" class="panel">
+<h2>คำวินิจฉัยจากผู้ทบทวน (E)</h2>
+{% for (review, rule) in reviews %}
+<section class="result">
+<h3>{{ rule.id }} {{ rule.name }} · {{ crate::ui::decision_label(review.decision.as_str()) }}</h3>
+<dl>
+<dt>หมวด OWASP / รุ่นกฎ</dt><dd>{{ rule.category }} / {{ rule.version }}</dd>
+<dt>รุ่นที่ทบทวน</dt><dd>{{ scan.release }}</dd>
+<dt>เกณฑ์ตัดสิน</dt><dd>{{ rule.evidence }}</dd>
+<dt>ผู้ทบทวน</dt><dd>{{ review.reviewer }}</dd>
+<dt>เหตุผล</dt><dd>{{ review.rationale }}</dd>
+<dt>หลักฐาน</dt><dd>{{ review.evidence }}</dd>
+<dt>เวลาบันทึก (Unix วินาที UTC)</dt><dd>{{ review.at }}</dd>
+<dt>วิธีแก้</dt><dd>{{ rule.remediation }}</dd>
+<dt>เกณฑ์ยืนยันการแก้ไข</dt><dd>{{ rule.closure }}</dd>
+</dl>
+</section>
+{% else %}<p>ยังไม่มีคำวินิจฉัยในรอบนี้</p>{% endfor %}
+{% if may_review %}
+<form action="/p/{{ p.id }}/s/{{ scan.id }}/review" method="post" class="stack no-print">
+<h3>เพิ่มคำวินิจฉัย</h3>
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<label>ข้อกำหนด <select name="rule" required>
+{% for rule in rules %}{% if rule.method == "E" %}<option value="{{ rule.id }}">{{ rule.id }} {{ rule.name }}</option>{% endif %}{% endfor %}
+</select></label>
+<label>ผลการทบทวน <select name="decision" required>
+  <option value="Finding">พบตามกฎ</option>
+  <option value="Review">ต้องทบทวน</option>
+  <option value="Passed">ผ่านเฉพาะกฎ</option>
+  <option value="Na">ไม่เกี่ยวข้อง</option>
+  <option value="Insufficient">ข้อมูลไม่พอ</option>
+</select></label>
+<label>เหตุผล <select name="rationale" required>
+{% for reason in reasons %}<option>{{ reason }}</option>{% endfor %}
+</select></label>
+<label>หลักฐานของรุ่นนี้ <textarea name="evidence" rows="5" maxlength="8192" required aria-describedby="review-hint" spellcheck="false"></textarea></label>
+<p id="review-hint" class="hint">ใช้เนื้อหาหรือเลขอ้างอิงเอกสารเพื่อบันทึกค่า SHA-256 หรือส่ง JSON ผล CI ที่มี case_id, commit, environment, expected, actual และ timestamp (Unix วินาที) ค่า expected และ actual ใช้ allow, deny, pass, fail, enabled หรือ disabled โดย commit และ environment ต้องสอดคล้องกับรุ่นและสภาพแวดล้อมของรอบนี้ เก็บต้นฉบับไว้กับผู้ทบทวน</p>
+<button>บันทึกคำวินิจฉัย</button>
+</form>
+{% endif %}
+</section>
+{% include "catalog.html" %}
+{% endif %}
+</article>
+{% endblock %}

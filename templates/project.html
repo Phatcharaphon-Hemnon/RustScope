@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}{{ p.name }} · RustScope{% endblock %}
+{% block content %}
+<nav class="no-print"><a href="/">โปรเจกต์ของคุณ</a> · <a href="#catalog">ทะเบียนกฎ</a></nav>
+<h1>{{ p.name }}</h1>
+<section class="panel">
+  <h2>ขอบเขตการตรวจ</h2>
+  <dl>
+    <dt>บทบาทของคุณ</dt><dd>{{ role_label }}</dd>
+    <dt>URL ขอบเขต</dt><dd><code>{{ scope_url }}</code></dd>
+    {% if p.upgrade %}<dt>ขอบเขตเพิ่มเติม</dt><dd>HTTPS ของโฮสต์และเส้นทางเดียวกัน</dd>{% endif %}
+    <dt>วันหมดอายุ (Unix วินาที UTC)</dt><dd>{{ p.expires }}</dd>
+    <dt>สถานะ</dt><dd>{% if !active %}หมดอายุ{% elif p.demo %}สาธิตออฟไลน์{% elif p.verified %}ยืนยันแล้ว{% else %}รอยืนยันการควบคุม{% endif %}</dd>
+  </dl>
+  {% if !challenge_url.is_empty() %}
+  <p>เผยแพร่ไฟล์ข้อความที่ URL <code>{{ challenge_url }}</code> โดยให้เนื้อหาเป็น <code>{{ p.challenge }}</code> แล้วกดยืนยัน</p>
+  {% if p.upgrade %}<p>เผยแพร่ไฟล์ยืนยันที่ URL เดียวกันผ่าน HTTPS (พอร์ตเริ่มต้น) ด้วยรหัสเดียวกัน</p>{% endif %}
+  <form action="/p/{{ p.id }}/verify" method="post">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><button>ยืนยันการควบคุม</button>
+  </form>
+  {% endif %}
+</section>
+<div class="layout">
+<section class="panel">
+  <h2>ประวัติการตรวจ</h2>
+  {% for scan in scans.iter().rev() %}
+  <p><a href="/p/{{ p.id }}/s/{{ scan.id }}">{{ scan.release }}</a> · {{ crate::ui::scan_status(scan.status.as_str()) }}</p>
+  {% else %}<p>ยังไม่มีรอบตรวจ</p>{% endfor %}
+</section>
+{% if owner %}
+<section class="panel">
+  <h2>เริ่มรอบตรวจ</h2>
+  {% if active && p.verified %}
+  <form action="/p/{{ p.id }}/scan" method="post" class="stack">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="request_id" value="{{ request_id }}">
+    <label>สภาพแวดล้อม <select name="environment"><option value="test">ทดสอบ</option><option value="staging">เตรียมขึ้นระบบ</option><option value="production">ระบบจริง</option></select></label>
+    <label>รุ่นที่ตรวจ <input name="release" required placeholder="v1.0"></label>
+    {% if p.demo %}
+    <label>URL เป้าหมาย <input name="target" type="url" value="https://fixture.invalid/login" readonly required></label>
+    <label>หลักฐานสาธิต
+      <select name="fixture">
+        <option value="issue">พบฟอร์มส่งผ่าน HTTP</option>
+        <option value="forbidden">หน้าเป้าหมายตอบ 403</option>
+        <option value="persistent">ยังพบฟอร์มส่งผ่าน HTTP</option>
+        <option value="fixed">ฟอร์มเดิมส่งผ่าน HTTPS</option>
+      </select>
+    </label>
+    {% else %}
+    <label>URL เป้าหมาย <input name="target" type="url" maxlength="2048" value="{{ p.base }}" required></label>
+    {% endif %}
+    <fieldset>
+      <legend>นโยบายและหลักฐานประกอบ</legend>
+      <label class="check"><input name="download" type="checkbox"{% if p.demo %} checked{% endif %}> เป้าหมายเป็นไฟล์ดาวน์โหลด (A02-01)</label>
+      <label>อายุ HSTS ขั้นต่ำ (วินาที, A02-02) <input name="hsts_min" type="number" min="0"{% if p.demo %} value="3600"{% endif %}></label>
+      <label>รหัสฟอร์มที่คาดว่าจะพบ (HTML id, A04-01/02) <input name="expected_form"{% if p.demo %} value="login"{% endif %}></label>
+      <label class="check"><input name="sri" type="checkbox"{% if p.demo %} checked{% endif %}> ต้องใช้ SRI สำหรับสคริปต์ภายนอก (A08-04)</label>
+      <label>เนื้อหา Cargo.lock (สูงสุด 256 KiB, A03-01/02) <textarea name="lock" rows="4" spellcheck="false"></textarea></label>
+      {% if p.demo %}<p class="hint">ถ้าเว้น Cargo.lock ว่าง ระบบใช้ไฟล์สาธิต</p>{% endif %}
+    </fieldset>
+    <p class="hint">ตรวจ HTTP ที่เลือก, HTML ที่เซิร์ฟเวอร์ส่ง และ Cargo.lock ของ crates.io กฎที่มีเงื่อนไขจะใช้ตามนโยบายที่ระบุ</p>
+    <div class="actions"><button>ส่งเข้าคิวตรวจ</button> <button name="preview" value="on">ตรวจความพร้อม</button></div>
+  </form>
+  {% else %}<p>ต้องมีขอบเขตที่ยืนยันแล้วและยังไม่หมดอายุก่อนเริ่มรอบตรวจ</p>{% endif %}
+</section>
+{% endif %}
+</div>
+{% if owner %}
+<section class="panel">
+  <h2>กำหนดสิทธิ์ให้สมาชิก</h2>
+  <form action="/p/{{ p.id }}/member" method="post" class="stack">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>ชื่อบัญชีที่มีอยู่แล้ว <input name="user" required></label>
+    <label>บทบาท <select name="role"><option value="viewer">ผู้ดูรายงาน</option><option value="reviewer">ผู้ทบทวน</option></select></label>
+    <button>บันทึกสิทธิ์</button>
+  </form>
+</section>
+{% endif %}
+{% include "catalog.html" %}
+{% endblock %}

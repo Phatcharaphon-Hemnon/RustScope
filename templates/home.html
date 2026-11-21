@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}โปรเจกต์ · RustScope{% endblock %}
+{% block content %}
+<h1>โปรเจกต์ของคุณ</h1>
+<div class="layout">
+  <section class="panel">
+    <h2>รายการโปรเจกต์</h2>
+    {% for p in projects %}
+    <p><a href="/p/{{ p.id }}">{{ p.name }}</a> · {% if p.demo %}สาธิตออฟไลน์{% elif p.verified %}ยืนยันขอบเขตแล้ว{% else %}รอยืนยันขอบเขต{% endif %}</p>
+    {% else %}<p>ยังไม่มีโปรเจกต์ที่คุณเข้าถึงได้</p>{% endfor %}
+  </section>
+  <section class="panel">
+    <h2>สร้างโปรเจกต์</h2>
+    <form action="/projects" method="post" class="stack">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label>ชื่อโปรเจกต์ <input name="name" maxlength="40" aria-describedby="name-hint" required></label>
+      <p id="name-hint" class="hint">สูงสุด 40 ตัวอักษร ใช้ภาษาไทย สระ วรรณยุกต์ และช่องว่างได้</p>
+      <label>โหมด
+        <select name="mode">
+          <option value="demo">สาธิตออฟไลน์</option>
+          <option value="live">ตรวจเว็บไซต์ที่ได้รับอนุญาต</option>
+        </select>
+      </label>
+      <label>URL ขอบเขตสำหรับโหมดเว็บไซต์ <input name="base" type="url" maxlength="2048" placeholder="https://example.org/app"></label>
+      <p class="hint">URL ระบุโฮสต์ พอร์ต และเส้นทางที่อนุญาต ใช้เฉพาะขอบเขตที่คุณได้รับอนุญาตให้ตรวจ</p>
+      <label class="check"><input name="upgrade" type="checkbox" value="on"> อนุมัติ HTTPS สำหรับโฮสต์และเส้นทางเดียวกันด้วย (โหมดเว็บไซต์, HTTP พอร์ตเริ่มต้น)</label>
+      <label>อายุของขอบเขต (วัน) <input name="days" type="number" value="7" min="1" max="30" required></label>
+      <button>สร้างโปรเจกต์</button>
+    </form>
+  </section>
+</div>
+{% endblock %}

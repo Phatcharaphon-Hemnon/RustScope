@@ -1,0 +1,19 @@
+<section id="catalog" class="panel">
+<h2>ทะเบียนกฎ 60 รายการ</h2>
+<p>A ตรวจหลักฐานโดยตรง · S วิเคราะห์ซอร์สโค้ดและทบทวนโดยนักพัฒนา · E ทบทวนตามนโยบายหรือหลักฐานภายใน</p>
+{% for rule in rules %}
+<details class="catalog-entry">
+  <summary><strong>{{ rule.id }} {{ rule.name }}</strong> · {{ rule.method }} · {% if rule.implemented %}ตรวจอัตโนมัติได้{% elif rule.method == "E" %}รองรับการทบทวนโดยคน{% else %}อยู่ในแผน{% endif %}</summary>
+  <dl>
+    <dt>หมวด OWASP</dt><dd>{{ rule.category }}</dd>
+    <dt>รุ่นกฎ</dt><dd>{{ rule.version }}</dd>
+    <dt>ข้อมูลและเงื่อนไขการใช้</dt><dd>{{ rule.inputs }} · {{ rule.applicability }}</dd>
+    <dt>หลักฐานและเกณฑ์ตัดสิน</dt><dd>{{ rule.evidence }}</dd>
+    <dt>ผลกระทบ</dt><dd>{{ rule.impact }}</dd>
+    <dt>ความรุนแรง / ความมั่นใจ</dt><dd>{{ rule.severity }} / {{ rule.confidence }}</dd>
+    <dt>วิธีแก้</dt><dd>{{ rule.remediation }}</dd>
+    <dt>เกณฑ์ยืนยันการแก้ไข</dt><dd>{{ rule.closure }}</dd>
+  </dl>
+</details>
+{% endfor %}
+</section>
