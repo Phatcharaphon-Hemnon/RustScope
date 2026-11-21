@@ -24,7 +24,7 @@ fn held_out_cases() {
     let before = include_str!("../fixtures/evaluation/before.html");
     let after = include_str!("../fixtures/evaluation/after.html");
     let rules = [
-        "A02-01", "A02-02", "A03-01", "A03-02", "A04-01", "A04-02", "A04-03", "A08-04",
+        "A02-01", "A02-02", "A03-01", "A03-02", "A04-01", "A04-02", "A04-03", "A08-04", "X03-01",
     ];
     let mut counts = BTreeMap::<&str, Counts>::new();
     for (scheme, body, status, lock, secured, labels) in [
@@ -34,7 +34,7 @@ fn held_out_cases() {
             200,
             Some(include_str!("../fixtures/evaluation/before.lock")),
             false,
-            [F, F, F, F, P, F, F, F],
+            [F, F, F, F, P, F, F, F, I],
         ),
         (
             "http",
@@ -42,7 +42,7 @@ fn held_out_cases() {
             200,
             Some(include_str!("../fixtures/evaluation/before.lock")),
             false,
-            [F, N, F, F, F, F, N, F],
+            [F, N, F, F, F, F, N, F, I],
         ),
         (
             "https",
@@ -50,9 +50,25 @@ fn held_out_cases() {
             200,
             Some(include_str!("../fixtures/evaluation/after.lock")),
             true,
-            [P, P, P, P, P, P, P, P],
+            [P, P, P, P, P, P, P, P, I],
         ),
-        ("https", "", 403, None, false, [I, I, I, I, I, I, I, I]),
+        ("https", "", 403, None, false, [I; 9]),
+        (
+            "https",
+            include_str!("../fixtures/evaluation/javascript-vulnerable.html"),
+            200,
+            None,
+            true,
+            [P, P, I, I, P, P, P, F, F],
+        ),
+        (
+            "https",
+            include_str!("../fixtures/evaluation/javascript-fixed.html"),
+            200,
+            None,
+            true,
+            [P, P, I, I, P, P, P, N, P],
+        ),
     ] {
         let mut headers = BTreeMap::from([("content-type".into(), "text/html".into())]);
         if secured {

@@ -1,4 +1,6 @@
 //! Passive checks over the collected document and response headers.
+mod javascript;
+
 use crate::{
     domain::{Observation, Outcome, Outcome::*},
     model::Policy,
@@ -59,6 +61,7 @@ pub fn evaluate(response: Result<&HttpEvidence, &str>, policy: &Policy) -> Vec<O
             ("A04-02", "document", true),
             ("A04-03", "document", true),
             ("A08-04", "document", policy.sri),
+            (javascript::RULE, "document", true),
         ] {
             let (outcome, observed) = if applicable {
                 (Insufficient, reason.as_str())
@@ -110,6 +113,12 @@ pub fn evaluate(response: Result<&HttpEvidence, &str>, policy: &Policy) -> Vec<O
             .is_some_and(|mime| mime.trim().eq_ignore_ascii_case("text/html"))
     });
     if !html || response.body.trim().is_empty() {
+        push(
+            javascript::RULE,
+            "document",
+            Insufficient,
+            "ไม่มีเนื้อหา HTML ที่ตรวจได้",
+        );
         for (rule, applicable) in [
             ("A04-01", true),
             ("A04-02", true),
@@ -418,6 +427,7 @@ impl<F: FnMut(&str, &str, Outcome, &str)> Document<'_, F> {
         let https = self.url.scheme() == "https";
         let mut mixed = false;
         let mut sri = false;
+        let mut library = false;
         let document = resource_key(self.url);
         for script in self.html.select(&selector("script[src]")) {
             let Some(src) = script
@@ -449,6 +459,7 @@ impl<F: FnMut(&str, &str, Outcome, &str)> Document<'_, F> {
                 .expect("serialize script identity");
             let item = identity("script", &key);
             let location = redacted_location(&url);
+            library |= javascript::evaluate(&url, &item, &location, &mut self.push);
             if https {
                 mixed = true;
                 let outcome = if url.scheme() == "http" {
@@ -479,6 +490,14 @@ impl<F: FnMut(&str, &str, Outcome, &str)> Document<'_, F> {
                     &format!("แหล่งสคริปต์ {location}: {detail}"),
                 );
             }
+        }
+        if !library {
+            (self.push)(
+                javascript::RULE,
+                "document",
+                Insufficient,
+                "ไม่พบไลบรารีพร้อมรุ่นที่ระบุได้จากชื่อไฟล์หรือ URL สคริปต์ใน HTML",
+            );
         }
         if !mixed {
             let observed = if https {
@@ -757,5 +776,91 @@ mod tests {
         assert_eq!(for_rule(&evaluate(Ok(&page), &policy), "A08-04"), [Finding]);
         page.body = "<script src='/same-origin'></script>".into();
         assert_eq!(for_rule(&evaluate(Ok(&page), &policy), "A08-04"), [Na]);
+    }
+
+    #[test]
+    fn javascript_uses_resolved_url_and_reports_redacted_advisory_details() {
+        for (body, origin) in [
+            (
+                r#"<script src="../private/jquery-3.4.1.min.js?sig=secret#fragment"></script>"#,
+                "https://site.test",
+            ),
+            (
+                r#"<script src="//cdn.test/private/jquery/3.4.1/jquery.min.js?sig=secret#fragment"></script>"#,
+                "https://cdn.test",
+            ),
+            (
+                r#"<base href="//cdn.test/private/jquery/3.4.1/">
+                   <script src="jquery.min.js?sig=secret#fragment"></script>"#,
+                "https://cdn.test",
+            ),
+            (
+                r#"<base href="../private/3.4.1/">
+                   <script src="jquery.min.js?sig=secret#fragment"></script>"#,
+                "https://site.test",
+            ),
+        ] {
+            let page = evidence("https://site.test/app/index.html", body);
+            let results = evaluate(Ok(&page), &policy());
+            assert_eq!(for_rule(&results, javascript::RULE), [Finding]);
+            let observed = &results
+                .iter()
+                .find(|obs| obs.rule == javascript::RULE)
+                .unwrap()
+                .observed;
+            for detail in [
+                origin,
+                "jquery",
+                "3.4.1",
+                "CVE-2020-11022",
+                "GHSA-gxr4-xjj5-5px2",
+                "รุ่นแรกที่แก้ไข: 3.5.0",
+                "ตรวจเฉพาะชื่อไฟล์และ URL",
+            ] {
+                assert!(observed.contains(detail), "{detail}: {observed}");
+            }
+            for secret in ["private", "sig=", "secret", "fragment"] {
+                assert!(!observed.contains(secret), "{secret}: {observed}");
+            }
+        }
+    }
+
+    #[test]
+    fn javascript_requires_a_recognised_comparable_declared_version() {
+        for (src, expected) in [
+            ("assets/jquery-3.7.1.js", Passed),
+            ("assets/jquery-3.5.0+build.1.min.js", Passed),
+            ("assets/jquery-3.5.0-rc.1.min.js", Finding),
+            ("assets/jquery-3.5.0-min.js", Finding),
+            ("assets/bootstrap-4.0.0-alpha.1.js", Passed),
+            ("assets/bootstrap-4.0.0-beta.js", Finding),
+            ("assets/bootstrap-4.0.0-beta.2.js", Passed),
+            ("assets/jquery-1.9.0b1.js", Insufficient),
+            ("assets/jquery-3.4.js", Insufficient),
+            ("assets/vendor-jquery-3.4.1.js", Insufficient),
+            ("assets/jquery-890f984e77ad.js", Insufficient),
+            ("assets/bundle.js?name=jquery-3.4.1.js", Insufficient),
+            ("assets/jquery/3.4.1/jquery.min.js.bak", Insufficient),
+        ] {
+            let page = evidence(
+                "http://site.test/",
+                &format!(r#"<script src="{src}"></script>"#),
+            );
+            assert_eq!(
+                for_rule(&evaluate(Ok(&page), &policy()), javascript::RULE),
+                [expected],
+                "{src}"
+            );
+        }
+
+        let page = evidence("https://site.test/", "<p>Checkout</p>");
+        assert_eq!(
+            for_rule(&evaluate(Ok(&page), &policy()), javascript::RULE),
+            [Insufficient]
+        );
+        assert_eq!(
+            for_rule(&evaluate(Err("timeout"), &policy()), javascript::RULE),
+            [Insufficient]
+        );
     }
 }

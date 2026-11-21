@@ -75,6 +75,12 @@ The Thai catalog has six requirements in each of ten OWASP categories. All 60 ID
 | A04-03 | Identify HTTP script declarations in HTTPS HTML |
 | A08-04 | Check integrity metadata syntax on policy-covered cross-origin script declarations |
 
+X03-01 appears on the **ส่วนขยาย** coverage row. It compares JavaScript library
+versions declared in script URL paths and filenames with the offline Retire.js
+snapshot. A comparable declaration outside all known affected ranges passes
+for that declaration. Missing declarations and versions that cannot be compared
+yield insufficient evidence. [Extension catalog](src/extensions.tsv)
+
 The bundled RustSec snapshot is dated **2026-11-20**, revision `f291af9b1cc0d21dfcea1709d6b037963cef262b`. The report identifies the snapshot used. Updating it is a deliberate rebuild with the supplied generator and tests. [Snapshot provenance and licensing](fixtures/advisories/README.md)
 
 ## Verification
@@ -91,7 +97,7 @@ python3 tests/demo.py --rounds-dir /tmp/rustscope-rounds
 
 Formatting, compilation and strict Clippy passed. **21 Rust tests passed**. The HTTP acceptance test verified the four A04-02 transitions, project and report isolation, viewer/reviewer permissions, CSRF rejection, retry deduplication, omission of simulated secrets from SQLite and reports, and preservation of machine evidence after review. Rust tests also exercised restart recovery, key loss, out-of-scope redirects, ambiguous form identities and environment changes. The missing-URL and missing-lockfile case produced **zero false closures across five open findings**. Chromium printed the Thai reports to A4 PDF.
 
-The separate evaluation fixtures cover four hand-labelled target scenarios across eight rules. Each rule scored precision 1.00 and recall 1.00 on this small set, with one insufficient-evidence outcome per rule. The evaluation test prints each rule’s counts. These figures describe the supplied fixtures only. [Evaluation fixtures](fixtures/evaluation) · [Scoring code](src/evaluation.rs)
+The evaluation fixtures cover six hand-labelled target scenarios across eight canonical rules and X03-01. The evaluation test prints each rule’s precision, recall, confusion counts and insufficient-evidence count for these fixtures. [Evaluation fixtures](fixtures/evaluation) · [Scoring code](src/evaluation.rs)
 
 ## Agent assignments
 

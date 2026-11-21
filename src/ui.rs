@@ -1,6 +1,6 @@
 use crate::{
     REASONS,
-    domain::{Change, Observation, Outcome, Round, Rule, catalog, compare},
+    domain::{Change, Observation, Outcome, Round, Rule, catalog, compare, extensions},
     model::{Project, Review, Scan},
     scope::{Scope, safe_url},
     web::redacted_location,
@@ -92,9 +92,13 @@ pub fn project(
         scans,
         csrf,
         request_id,
-        rules: catalog(),
+        rules: visible_rules(),
     }
     .render()?)
+}
+
+fn visible_rules() -> Vec<Rule> {
+    catalog().into_iter().chain(extensions()).collect()
 }
 
 struct Coverage {
@@ -118,6 +122,7 @@ struct Report<'a> {
     rules: Vec<Rule>,
     coverage: Vec<Coverage>,
     assessed_total: usize,
+    canonical_total: usize,
     observations: Vec<(&'a Observation, Rule)>,
     changes: Vec<Change>,
     previous: Option<&'a Scan>,
@@ -153,7 +158,7 @@ pub fn report(
             .collect();
         changes = compare(&rounds);
     }
-    let rules = catalog();
+    let rules = visible_rules();
     let observations: Vec<_> = scan
         .results
         .iter()
@@ -179,6 +184,7 @@ pub fn report(
         ("A", "ตรวจหลักฐานโดยตรง"),
         ("S", "วิเคราะห์ซอร์สโค้ด"),
         ("E", "ทบทวนหลักฐานโดยคน"),
+        ("X", "ส่วนขยาย"),
     ]
     .into_iter()
     .map(|(method, description)| {
@@ -212,7 +218,9 @@ pub fn report(
         coverage
     })
     .collect::<Vec<_>>();
-    let assessed_total = coverage.iter().map(|row| row.assessed).sum();
+    let canonical = coverage.iter().filter(|row| row.method != "X");
+    let assessed_total = canonical.clone().map(|row| row.assessed).sum();
+    let canonical_total = canonical.map(|row| row.total).sum();
     Ok(Report {
         p,
         scan,
@@ -225,6 +233,7 @@ pub fn report(
         rules,
         coverage,
         assessed_total,
+        canonical_total,
         observations,
         changes,
         previous: history.iter().rev().find(|prior| {
@@ -248,7 +257,7 @@ struct Preview<'a> {
 }
 
 pub fn preview(p: &Project, scan: &Scan) -> anyhow::Result<String> {
-    let rows = catalog()
+    let rows = visible_rules()
         .into_iter()
         .filter(|rule| rule.implemented)
         .map(|rule| {
@@ -263,6 +272,7 @@ pub fn preview(p: &Project, scan: &Scan) -> anyhow::Result<String> {
                 }
                 "A04-01" | "A04-02" => "รอ HTML ตอบกลับและตรวจว่ามีฟอร์มรหัสผ่านหรือไม่",
                 "A04-03" => "รอเอกสาร HTTPS และ URL สคริปต์ที่ประกาศ",
+                "X03-01" => "รอ HTML และรุ่นที่ประกาศใน URL สคริปต์",
                 "A08-04" if !scan.policy.sri => "ไม่เกี่ยวข้องตามนโยบาย SRI",
                 "A08-04" => "รอรายการสคริปต์ภายนอกและแอตทริบิวต์ integrity",
                 _ => unreachable!("preflight entry for every implemented rule"),
@@ -411,10 +421,27 @@ mod tests {
             observed: "ไม่มีไฟล์ Cargo.lock".into(),
         }];
         let body = preview(&p, &scan).unwrap();
-        assert_eq!(body.matches("data-rule=").count(), 8);
+        assert_eq!(body.matches("data-rule=").count(), 9);
         assert!(body.contains("ไม่มีไฟล์ Cargo.lock"));
         assert!(body.contains("รอ HTML ตอบกลับ"));
         assert!(body.contains("ไม่เกี่ยวข้องตามนโยบาย SRI"));
+    }
+
+    #[test]
+    fn report_lists_extension_coverage_outside_the_canonical_totals() {
+        let (p, mut scan) = example();
+        let response = crate::scope::HttpEvidence {
+            final_url: "https://shop.example/checkout".into(),
+            status: 200,
+            headers: [("content-type".into(), "text/html".into())].into(),
+            body: include_str!("../fixtures/evaluation/javascript-vulnerable.html").into(),
+        };
+        scan.results = crate::web::evaluate(Ok(&response), &scan.policy);
+        let body = report(&p, "viewer", &scan, &[], &[], "csrf").unwrap();
+        assert!(body.contains("/ 60 กฎมาตรฐาน"));
+        assert!(body.contains("ส่วนขยาย</th><td>1 / 1</td><td>1</td>"));
+        assert!(body.contains("data-rule=\"X03-01\""));
+        assert!(body.contains("CVE-2020-11022"));
     }
 
     #[test]

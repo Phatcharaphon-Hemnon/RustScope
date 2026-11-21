@@ -128,6 +128,14 @@ def run(binary, state, output=None, rounds_dir=None):
             else:
                 raise AssertionError(f"expected A04-02 {change} for {fixture}")
             assert "SIMULATED_SECRET" not in body and "@media print" in body
+            assert "ส่วนขยาย" in body and "/ 60 กฎมาตรฐาน" in body
+            rule = None
+            for tag in tags:
+                rule = tag.get("data-rule", rule)
+                if rule == "X03-01" and tag.get("data-outcome") == "Insufficient":
+                    break
+            else:
+                raise AssertionError(f"expected X03-01 insufficient evidence for {fixture}")
             if fixture == "forbidden":
                 assert "403" in body
             reports[fixture] = path

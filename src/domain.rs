@@ -50,14 +50,20 @@ pub struct Rule {
 }
 
 pub fn catalog() -> Vec<Rule> {
-    include_str!("catalog.tsv")
-        .lines()
-        .map(|line| {
-            let [category, id, method, name, evidence, remediation]: [&str; 6] = line
-                .split('\t')
-                .collect::<Vec<_>>()
-                .try_into()
-                .expect("canonical catalog has six columns");
+    parse_catalog(include_str!("catalog.tsv"))
+}
+
+pub fn extensions() -> Vec<Rule> {
+    parse_catalog(include_str!("extensions.tsv"))
+}
+
+fn parse_catalog(rows: &'static str) -> Vec<Rule> {
+    rows.lines()
+        .filter_map(|line| {
+            let columns = line.split('\t').collect::<Vec<_>>();
+            let &[category, id, method, name, evidence, remediation] = columns.as_slice() else {
+                return None;
+            };
             let (inputs, applicability, closure, impact, severity) = match id {
                 "A02-01" => (
                     "HTTP headers",
@@ -115,6 +121,13 @@ pub fn catalog() -> Vec<Rule> {
                     "ขาดข้อมูลที่เบราว์เซอร์ใช้ตรวจความสมบูรณ์",
                     "ปานกลาง",
                 ),
+                "X03-01" => (
+                    "HTML, final URL, Retire.js",
+                    "HTML ที่ประกาศชื่อไฟล์หรือ URL สคริปต์พร้อมรุ่นที่ตรวจได้",
+                    "พบรายการเดิมพร้อมรุ่นที่เปรียบเทียบได้และพ้นช่วงตามประกาศ",
+                    "รุ่นที่ประกาศอยู่ในช่วงที่ได้รับผลกระทบ",
+                    "ตามประกาศ",
+                ),
                 _ => (
                     evidence,
                     evidence,
@@ -133,8 +146,9 @@ pub fn catalog() -> Vec<Rule> {
                     | "A04-02"
                     | "A04-03"
                     | "A08-04"
+                    | "X03-01"
             );
-            Rule {
+            Some(Rule {
                 id,
                 category,
                 method,
@@ -147,13 +161,15 @@ pub fn catalog() -> Vec<Rule> {
                 closure,
                 impact,
                 severity,
-                confidence: if implemented {
+                confidence: if id == "X03-01" {
+                    "ตรวจจากชื่อไฟล์และ URL ที่ประกาศเท่านั้น"
+                } else if implemented {
                     "ตามหลักฐานที่สังเกตได้โดยตรง"
                 } else {
                     "ต้องตรวจหลักฐานโดยผู้ทบทวน"
                 },
                 implemented,
-            }
+            })
         })
         .collect()
 }

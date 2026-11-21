@@ -36,18 +36,18 @@
 {% if !pending %}
 <section class="panel">
 <h2>ความครอบคลุม</h2>
-<p class="coverage-count"><strong>ประเมินได้ {{ assessed_total }} / {{ rules.len() }} กฎ</strong></p>
+<p class="coverage-count"><strong>ประเมินได้ {{ assessed_total }} / {{ canonical_total }} กฎมาตรฐาน</strong></p>
 <table>
 <thead><tr><th scope="col">วิธี</th><th scope="col">กฎที่ประเมินได้ / ทั้งหมด</th><th scope="col">กฎอัตโนมัติที่มีผลบันทึก</th></tr></thead>
 <tbody>{% for row in coverage %}
-<tr><th scope="row">{{ row.method }} · {{ row.description }}</th><td>{{ row.assessed }} / {{ row.total }}</td><td>{{ row.executed }}</td></tr>
+<tr><th scope="row">{% if row.method != "X" %}{{ row.method }} · {% endif %}{{ row.description }}</th><td>{{ row.assessed }} / {{ row.total }}</td><td>{{ row.executed }}</td></tr>
 {% endfor %}</tbody>
 </table>
 </section>
 <section id="results" class="panel">
 <h2>ผลตรวจอัตโนมัติ</h2>
 {% for (obs, rule) in observations %}
-<section class="result" data-rule="{{ rule.id }}">
+<section class="result" data-rule="{{ rule.id }}" data-outcome="{{ "{:?}"|format(obs.outcome) }}">
 <h3>{{ rule.id }} {{ rule.name }} · {{ obs.outcome.thai() }}</h3>
 <dl>
 <dt>หมวด OWASP / รุ่นกฎ</dt><dd>{{ rule.category }} / {{ rule.version }}</dd>
