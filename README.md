@@ -15,6 +15,17 @@ cargo build --locked
 
 Each account command prints a generated login credential once. Run those two commands on first setup. Open **http://localhost:3100** or **http://127.0.0.1:3100** and sign in as `owner`. Set `RUSTSCOPE_STATE` to select the private state directory (default `./state`) and `RUSTSCOPE_PORT` to change the port. Run one server per state directory. Keep the SQLite database and its mode-0600 encryption key together in a protected backup with the account files. Losing the key prevents URL recovery.
 
+## Update the interface styles
+
+Edit the Askama files in `templates/` or the Tailwind rules in `frontend/tailwind.css`. Install the [Tailwind CSS v4.1.18 standalone CLI](https://github.com/tailwindlabs/tailwindcss/releases/tag/v4.1.18) for your platform and make it available as `tailwindcss`. From the repository root, regenerate the checked-in stylesheet and rebuild the app.
+
+```sh
+tailwindcss -i frontend/tailwind.css -o templates/style.css --minify
+cargo build --locked
+```
+
+Askama includes the compiled CSS in each page. The normal Cargo build and the running server require only the committed stylesheet.
+
 ## Reproduce the four-round demo
 
 ```sh

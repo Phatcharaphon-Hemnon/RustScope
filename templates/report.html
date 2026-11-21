@@ -2,8 +2,8 @@
 {% block title %}รายงาน {{ scan.release }} · RustScope{% endblock %}
 {% block refresh %}{% if pending %}<meta http-equiv="refresh" content="4">{% endif %}{% endblock %}
 {% block content %}
-<nav class="no-print"><a href="/p/{{ p.id }}">กลับไปยังโปรเจกต์</a>{% if !pending %} · <a href="#results">ผลตรวจ</a> · <a href="#compare">ตรวจซ้ำ</a> · <a href="#reviews">การทบทวน</a> · <a href="#catalog">ทะเบียนกฎ</a>{% endif %}</nav>
-<article data-status="{{ scan.status }}">
+<nav class="no-print audit-nav"><a href="/p/{{ p.id }}">กลับไปยังโปรเจกต์</a>{% if !pending %} · <a href="#results">ผลตรวจ</a> · <a href="#compare">ตรวจซ้ำ</a> · <a href="#reviews">การทบทวน</a> · <a href="#catalog">ทะเบียนกฎ</a>{% endif %}</nav>
+<article class="report-shell" data-status="{{ scan.status }}">
 {% if pending %}
 <section class="panel waiting" role="status" aria-live="polite">
 <h1>{% if scan.status == "running" %}กำลังตรวจสอบ{% else %}รอคิวตรวจ{% endif %}</h1>
@@ -15,7 +15,7 @@
 {% else %}
 <h1>รายงานการตรวจประเมิน</h1>
 <p class="subtitle">{{ p.name }} · {{ scan.release }}</p>
-<details class="panel"><summary>ข้อมูลรอบตรวจ</summary><dl>
+<details class="panel scan-meta"><summary>ข้อมูลรอบตรวจ</summary><dl>
 {% if p.demo %}<dt>โหมด</dt><dd>สาธิตออฟไลน์ด้วยข้อมูลจำลอง</dd>{% endif %}
 <dt>รหัสโปรเจกต์</dt><dd><code>{{ p.id }}</code></dd>
 <dt>รหัสรอบตรวจ</dt><dd><code>{{ scan.id }}</code></dd>
@@ -36,7 +36,7 @@
 {% if !pending %}
 <section class="panel">
 <h2>ความครอบคลุม</h2>
-<p><strong>ประเมินได้ {{ assessed_total }} / {{ rules.len() }} กฎ</strong></p>
+<p class="coverage-count"><strong>ประเมินได้ {{ assessed_total }} / {{ rules.len() }} กฎ</strong></p>
 <table>
 <thead><tr><th scope="col">วิธี</th><th scope="col">กฎที่ประเมินได้ / ทั้งหมด</th><th scope="col">กฎอัตโนมัติที่มีผลบันทึก</th></tr></thead>
 <tbody>{% for row in coverage %}
@@ -96,7 +96,7 @@
 </section>
 {% else %}<p>ยังไม่มีคำวินิจฉัยในรอบนี้</p>{% endfor %}
 {% if may_review %}
-<form action="/p/{{ p.id }}/s/{{ scan.id }}/review" method="post" class="stack no-print">
+<form action="/p/{{ p.id }}/s/{{ scan.id }}/review" method="post" class="stack no-print review-form">
 <h3>เพิ่มคำวินิจฉัย</h3>
 <input type="hidden" name="csrf" value="{{ csrf }}">
 <label>ข้อกำหนด <select name="rule" required>

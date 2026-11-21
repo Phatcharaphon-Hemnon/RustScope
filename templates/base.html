@@ -7,8 +7,8 @@
 {% block refresh %}{% endblock %}
 <style>{% include "style.css" %}</style>
 </head>
-<body>
-<header class="banner"><div class="wrap"><a href="/">RustScope</a></div></header>
-<main class="wrap">{% block content %}{% endblock %}</main>
+<body class="app-shell">
+<header class="banner"><div class="wrap"><a class="brand-link" href="/">RustScope</a></div></header>
+<main class="wrap app-main">{% block content %}{% endblock %}</main>
 </body>
 </html>

@@ -1,9 +1,9 @@
 {% extends "base.html" %}
 {% block title %}{{ p.name }} · RustScope{% endblock %}
 {% block content %}
-<nav class="no-print"><a href="/">โปรเจกต์ของคุณ</a> · <a href="#catalog">ทะเบียนกฎ</a></nav>
-<h1>{{ p.name }}</h1>
-<section class="panel">
+<nav class="no-print audit-nav"><a href="/">โปรเจกต์ของคุณ</a> · <a href="#catalog">ทะเบียนกฎ</a></nav>
+<h1 class="dashboard-heading">{{ p.name }}</h1>
+<section class="panel project-scope">
   <h2>ขอบเขตการตรวจ</h2>
   <dl>
     <dt>บทบาทของคุณ</dt><dd>{{ role_label }}</dd>
@@ -14,8 +14,8 @@
   </dl>
   {% if !verification_error.is_empty() %}<p class="form-error" role="alert">{{ verification_error }}</p>{% endif %}
   {% if !challenge_url.is_empty() %}
-  <p>เผยแพร่ไฟล์ <code>rustscope-verification.txt</code> ที่ <code>{{ challenge_url }}</code></p>
-  <p>ให้ไฟล์มีเฉพาะรหัส <code>{{ p.challenge }}</code> เปิด URL เพื่อตรวจว่าเห็นรหัสอย่างเดียว แล้วกดยืนยัน</p>
+  <p class="scope-instruction">เผยแพร่ไฟล์ <code>rustscope-verification.txt</code> ที่ <code>{{ challenge_url }}</code></p>
+  <p class="scope-instruction">ให้ไฟล์มีเฉพาะรหัส <code>{{ p.challenge }}</code> เปิด URL เพื่อตรวจว่าเห็นรหัสอย่างเดียว แล้วกดยืนยัน</p>
   {% if p.upgrade %}<p>เผยแพร่ไฟล์ยืนยันที่ URL เดียวกันผ่าน HTTPS (พอร์ตเริ่มต้น) ด้วยรหัสเดียวกัน</p>{% endif %}
   <form action="/p/{{ p.id }}/verify" method="post">
     <input type="hidden" name="csrf" value="{{ csrf }}"><button>ยืนยันการควบคุม</button>
@@ -26,7 +26,7 @@
 <section class="panel">
   <h2>ประวัติการตรวจ</h2>
   {% for scan in scans.iter().rev() %}
-  <p><a href="/p/{{ p.id }}/s/{{ scan.id }}">{{ scan.release }}</a> · {{ crate::ui::scan_status(scan.status.as_str()) }}</p>
+  <p class="list-row"><a href="/p/{{ p.id }}/s/{{ scan.id }}">{{ scan.release }}</a> · {{ crate::ui::scan_status(scan.status.as_str()) }}</p>
   {% else %}<p>ยังไม่มีรอบตรวจ</p>{% endfor %}
 </section>
 {% if owner %}
@@ -51,7 +51,7 @@
     {% else %}
     <label>URL เป้าหมาย <input name="target" type="url" maxlength="2048" value="{{ p.base }}" required></label>
     {% endif %}
-    <details><summary>ตั้งค่าขั้นสูงและแนบ Cargo.lock</summary><fieldset>
+    <details class="subpanel"><summary>ตั้งค่าขั้นสูงและแนบ Cargo.lock</summary><fieldset>
       <legend>นโยบายและหลักฐานประกอบ</legend>
       <label class="check"><input name="download" type="checkbox"{% if p.demo %} checked{% endif %}> เป้าหมายเป็นไฟล์ดาวน์โหลด (A02-01)</label>
       <label>อายุ HSTS ขั้นต่ำ (วินาที, A02-02) <input name="hsts_min" type="number" min="0"{% if p.demo %} value="3600"{% endif %}></label>
@@ -67,7 +67,7 @@
 {% endif %}
 </div>
 {% if owner %}
-<details class="panel">
+<details class="panel member-panel">
   <summary>จัดการสมาชิก</summary>
   <form action="/p/{{ p.id }}/member" method="post" class="stack">
     <input type="hidden" name="csrf" value="{{ csrf }}">

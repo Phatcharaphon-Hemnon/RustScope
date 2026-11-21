@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 {% block title %}โปรเจกต์ · RustScope{% endblock %}
 {% block content %}
-<h1>โปรเจกต์ของคุณ</h1>
-<div class="layout">
+<h1 class="dashboard-heading">โปรเจกต์ของคุณ</h1>
+<div class="layout home-layout">
   <section class="panel">
     <h2>รายการโปรเจกต์</h2>
     {% for p in projects %}
-    <p><a href="/p/{{ p.id }}">{{ p.name }}</a> · {% if p.demo %}สาธิตออฟไลน์{% elif p.verified %}ยืนยันขอบเขตแล้ว{% else %}รอยืนยันขอบเขต{% endif %}</p>
-    {% else %}<p>ยังไม่มีโปรเจกต์ที่คุณเข้าถึงได้</p>{% endfor %}
+    <p class="list-row"><a href="/p/{{ p.id }}">{{ p.name }}</a> · {% if p.demo %}สาธิตออฟไลน์{% elif p.verified %}ยืนยันขอบเขตแล้ว{% else %}รอยืนยันขอบเขต{% endif %}</p>
+    {% else %}<p class="hint">ยังไม่มีโปรเจกต์ที่คุณเข้าถึงได้</p>{% endfor %}
   </section>
   <section class="panel">
     <h2>สร้างโปรเจกต์</h2>

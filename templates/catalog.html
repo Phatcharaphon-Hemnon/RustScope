@@ -1,6 +1,6 @@
-<details id="catalog" class="panel">
+<details id="catalog" class="panel catalog-panel">
 <summary>ดูกฎทั้งหมด (60)</summary>
-<p>A ตรวจหลักฐานโดยตรง · S วิเคราะห์ซอร์สโค้ดและทบทวนโดยนักพัฒนา · E ทบทวนตามนโยบายหรือหลักฐานภายใน</p>
+<p class="hint">A ตรวจหลักฐานโดยตรง · S วิเคราะห์ซอร์สโค้ดและทบทวนโดยนักพัฒนา · E ทบทวนตามนโยบายหรือหลักฐานภายใน</p>
 {% for rule in rules %}
 <details class="catalog-entry">
   <summary><strong>{{ rule.id }} {{ rule.name }}</strong> · {{ rule.method }} · {% if rule.implemented %}ตรวจอัตโนมัติได้{% elif rule.method == "E" %}รองรับการทบทวนโดยคน{% else %}อยู่ในแผน{% endif %}</summary>
