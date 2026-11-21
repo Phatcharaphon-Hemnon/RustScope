@@ -97,6 +97,10 @@ impl Scope {
         Ok(self)
     }
 
+    pub fn is_https(&self) -> bool {
+        self.base.scheme() == "https"
+    }
+
     fn active(&self) -> Result<(), Error> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -218,6 +222,14 @@ impl Scope {
                     return Err("unexpected peer");
                 }
                 let status = response.status().as_u16();
+                if !redirects && status != 200 {
+                    return Err(match status {
+                        300..=399 => "verification redirected",
+                        401 | 403 => "verification forbidden",
+                        404 => "verification file missing",
+                        _ => "verification HTTP error",
+                    });
+                }
                 if redirects && matches!(status, 301 | 302 | 303 | 307 | 308) {
                     let location = response
                         .headers()
@@ -247,7 +259,11 @@ impl Scope {
                 let mut bytes = Vec::new();
                 while let Some(chunk) = response.chunk().await.map_err(|_| "incomplete response")? {
                     if chunk.len() > limit - bytes.len() {
-                        return Err("response too large");
+                        return Err(if redirects {
+                            "response too large"
+                        } else {
+                            "verification response too large"
+                        });
                     }
                     bytes.extend_from_slice(&chunk);
                 }
@@ -464,6 +480,40 @@ mod tests {
             let changes = compare(&rounds);
             let form = changes.iter().find(|v| v.rule == "A04-02").unwrap();
             assert_eq!(form.status, expected);
+        }
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn verification_distinguishes_error_pages_from_token_files() {
+        use axum::{Router, http::StatusCode, routing::get};
+        const TOKEN: &str = "12345678901234567890123456789012";
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let peer = listener.local_addr().unwrap();
+        let router = Router::new()
+            .route(
+                "/missing/rustscope-verification.txt",
+                get(|| async { (StatusCode::NOT_FOUND, "error page".repeat(100)) }),
+            )
+            .route(
+                "/fallback/rustscope-verification.txt",
+                get(|| async { axum::response::Html("<p>fallback page</p>".repeat(100)) }),
+            )
+            .route(
+                "/valid/rustscope-verification.txt",
+                get(|| async { format!("{TOKEN}\n") }),
+            );
+        let server = tokio::spawn(axum::serve(listener, router).into_future());
+        for (path, expected) in [
+            ("missing", Err("verification file missing")),
+            ("fallback", Err("verification response too large")),
+            ("valid", Ok(())),
+        ] {
+            let mut scope = Scope::new(&format!("http://{peer}/{path}"), i64::MAX).unwrap();
+            scope.fixture_peer = Some(peer);
+            assert_eq!(scope.verify(TOKEN).await, expected);
         }
         server.abort();
     }

@@ -12,8 +12,10 @@
     <dt>วันหมดอายุ (Unix วินาที UTC)</dt><dd>{{ p.expires }}</dd>
     <dt>สถานะ</dt><dd>{% if !active %}หมดอายุ{% elif p.demo %}สาธิตออฟไลน์{% elif p.verified %}ยืนยันแล้ว{% else %}รอยืนยันการควบคุม{% endif %}</dd>
   </dl>
+  {% if !verification_error.is_empty() %}<p class="form-error" role="alert">{{ verification_error }}</p>{% endif %}
   {% if !challenge_url.is_empty() %}
-  <p>เผยแพร่ไฟล์ข้อความที่ URL <code>{{ challenge_url }}</code> โดยให้เนื้อหาเป็น <code>{{ p.challenge }}</code> แล้วกดยืนยัน</p>
+  <p>เผยแพร่ไฟล์ <code>rustscope-verification.txt</code> ที่ <code>{{ challenge_url }}</code></p>
+  <p>ให้ไฟล์มีเฉพาะรหัส <code>{{ p.challenge }}</code> เปิด URL เพื่อตรวจว่าเห็นรหัสอย่างเดียว แล้วกดยืนยัน</p>
   {% if p.upgrade %}<p>เผยแพร่ไฟล์ยืนยันที่ URL เดียวกันผ่าน HTTPS (พอร์ตเริ่มต้น) ด้วยรหัสเดียวกัน</p>{% endif %}
   <form action="/p/{{ p.id }}/verify" method="post">
     <input type="hidden" name="csrf" value="{{ csrf }}"><button>ยืนยันการควบคุม</button>

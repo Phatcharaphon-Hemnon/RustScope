@@ -36,6 +36,7 @@ input:not([type=checkbox]), select, textarea { width: 100%; border: 1px solid #8
 textarea { resize: vertical; }
 button { justify-self: start; background: var(--accent); color: white; padding: .45rem .9rem; border-radius: .35rem; border: 1px solid var(--accent); cursor: pointer; }
 .hint { font-size: .9rem; color: #3d565e; margin: 0; }
+.form-error { color: #9a251e; margin: 0; }
 dl { display: grid; grid-template-columns: minmax(8rem, 27%) 1fr; gap: .35rem 1rem; margin: 0; }
 dt { font-weight: 650; }
 dd { margin: 0; min-width: 0; }

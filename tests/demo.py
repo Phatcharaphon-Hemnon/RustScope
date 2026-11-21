@@ -79,6 +79,25 @@ def run(binary, state, output=None, rounds_dir=None):
             tokens[name] = Page(body).value("csrf")
         owner, auditor, reader = (clients[k] for k in ("owner", "auditor", "reader"))
         csrf = tokens["owner"]
+        live = dict(csrf=csrf, mode="live", name="Authorized website", days=7, upgrade="on")
+        _, error_form = owner.request("/projects", live, expected=400)
+        assert "กรุณากรอก URL ขอบเขต" in error_form
+        assert Page(error_form).value("name") == live["name"]
+        _, error_form = owner.request("/projects", dict(live, base="https://example.invalid/app?q=1"), expected=400)
+        assert "ใช้ URL HTTP หรือ HTTPS" in error_form
+        live_path, live_page = owner.request("/projects", dict(live, base="https://example.invalid/app"))
+        assert live_path.startswith("/p/")
+        assert "https://example.invalid/app/rustscope-verification.txt" in live_page
+        assert "http://example.invalid/" not in live_page
+        _, error_form = owner.request("/projects", dict(live, base="http://example.invalid:8080/app"), expected=400)
+        assert "พอร์ต 80" in error_form
+        _, paired_page = owner.request("/projects", dict(live, base="http://example.invalid/app"))
+        assert "http://example.invalid/app/rustscope-verification.txt" in paired_page
+        assert "เผยแพร่ไฟล์ยืนยันที่ URL เดียวกันผ่าน HTTPS" in paired_page
+        loopback, _ = owner.request("/projects", dict(live, base="http://127.0.0.1", upgrade=""))
+        _, verify_error = owner.request(loopback + "/verify", {"csrf": csrf}, expected=422)
+        assert "IPv4 สาธารณะ" in verify_error
+        assert "http://127.0.0.1/rustscope-verification.txt" in verify_error
         project, body = owner.request("/projects", dict(csrf=csrf, mode="demo", name="Acceptance", days=1))
         assert all(f"A{c:02}-{n:02}" in body for c in range(1, 11) for n in range(1, 7))
         auditor.request(project, expected=403)

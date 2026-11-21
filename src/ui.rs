@@ -20,10 +20,26 @@ pub fn login() -> anyhow::Result<String> {
 struct Home<'a> {
     projects: &'a [Project],
     csrf: &'a str,
+    form: ProjectForm<'a>,
 }
 
-pub fn home(projects: &[Project], csrf: &str) -> anyhow::Result<String> {
-    Ok(Home { projects, csrf }.render()?)
+#[derive(Default)]
+pub struct ProjectForm<'a> {
+    pub name: &'a str,
+    pub base: &'a str,
+    pub days: &'a str,
+    pub live: bool,
+    pub upgrade: bool,
+    pub error: &'a str,
+}
+
+pub fn home(projects: &[Project], csrf: &str, form: ProjectForm<'_>) -> anyhow::Result<String> {
+    Ok(Home {
+        projects,
+        csrf,
+        form,
+    }
+    .render()?)
 }
 
 #[derive(Template)]
@@ -34,6 +50,7 @@ struct ProjectPage<'a> {
     role_label: &'static str,
     scope_url: String,
     challenge_url: String,
+    verification_error: &'a str,
     active: bool,
     scans: &'a [Scan],
     csrf: &'a str,
@@ -47,6 +64,7 @@ pub fn project(
     scans: &[Scan],
     csrf: &str,
     request_id: &str,
+    verification_error: &str,
 ) -> anyhow::Result<String> {
     let owner = role == "owner";
     let scope = Scope::new(&p.base, p.expires).ok();
@@ -69,6 +87,7 @@ pub fn project(
             safe_url(&p.base)
         },
         challenge_url,
+        verification_error,
         active: scope.is_some(),
         scans,
         csrf,
@@ -362,12 +381,12 @@ mod tests {
     #[test]
     fn templates_escape_evidence_and_hide_owner_actions() {
         let (p, scan) = example();
-        let viewer = project(&p, "viewer", &[], "csrf", "request").unwrap();
+        let viewer = project(&p, "viewer", &[], "csrf", "request", "").unwrap();
         assert!(!viewer.contains(&p.challenge));
         assert!(!viewer.contains("/verify"));
         assert!(!viewer.contains("/member"));
         assert!(viewer.contains("A10-06"));
-        let owner = project(&p, "owner", &[], "csrf", "request").unwrap();
+        let owner = project(&p, "owner", &[], "csrf", "request", "").unwrap();
         assert!(owner.contains(&p.challenge));
         assert!(owner.contains("/verify"));
 

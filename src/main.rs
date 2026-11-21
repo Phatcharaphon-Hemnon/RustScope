@@ -119,36 +119,75 @@ async fn home(State(app): State<Shared>, h: HeaderMap) -> Answer<Response> {
     let Ok(s) = session(&app, &h) else {
         return Ok(Redirect::to("/login").into_response());
     };
-    Ok(Html(ui::home(&app.store.projects(&s.user).await?, &s.csrf)?).into_response())
+    let form = ui::ProjectForm {
+        days: "7",
+        ..Default::default()
+    };
+    Ok(Html(ui::home(
+        &app.store.projects(&s.user).await?,
+        &s.csrf,
+        form,
+    )?)
+    .into_response())
 }
 async fn create(
     State(app): State<Shared>,
     h: HeaderMap,
     Form(f): Form<Fields>,
-) -> Answer<Redirect> {
+) -> Answer<Response> {
     let s = mutation(&app, &h, &f)?;
-    let name = field(&f, "name");
-    let demo = match field(&f, "mode") {
+    let project = match project_input(&f) {
+        Ok(project) => project,
+        Err(error) => {
+            let form = ui::ProjectForm {
+                name: field(&f, "name"),
+                base: field(&f, "base"),
+                days: field(&f, "days"),
+                live: field(&f, "mode") == "live",
+                upgrade: field(&f, "upgrade") == "on",
+                error,
+            };
+            let html = ui::home(&app.store.projects(&s.user).await?, &s.csrf, form)?;
+            return Ok((StatusCode::BAD_REQUEST, Html(html)).into_response());
+        }
+    };
+    app.store.create(&s.user, &project).await?;
+    Ok(Redirect::to(&format!("/p/{}", project.id)).into_response())
+}
+
+fn project_input(f: &Fields) -> Result<Project, &'static str> {
+    let name = field(f, "name");
+    let demo = match field(f, "mode") {
         "demo" => true,
         "live" => false,
-        _ => return Err(invalid()),
+        _ => return Err("กรุณาเลือกโหมดสร้างโปรเจกต์"),
     };
-    let days = field(&f, "days").parse::<i64>().map_err(|_| invalid())?;
+    let days = field(f, "days")
+        .parse::<i64>()
+        .ok()
+        .filter(|days| (1..=30).contains(days))
+        .ok_or("อายุของขอบเขตต้องอยู่ระหว่าง 1 ถึง 30 วัน")?;
     let valid_name = (1..=40).contains(&name.chars().count()) && name.chars().all(|c| c.is_alphanumeric() || matches!(c,' '|'_'|'-'|'.'|'\u{0e31}'|'\u{0e34}'..='\u{0e3a}'|'\u{0e47}'..='\u{0e4e}'));
-    if !valid_name || !(1..=30).contains(&days) {
-        return Err(invalid());
+    if !valid_name {
+        return Err("ชื่อโปรเจกต์ต้องมี 1 ถึง 40 ตัวอักษร ใช้ตัวอักษร ตัวเลข เว้นวรรค จุด ขีดกลาง หรือขีดล่าง");
     }
     let base = if demo {
         "https://fixture.invalid"
     } else {
-        field(&f, "base")
+        field(f, "base")
     };
     let expires = now() + days * 86400;
-    let upgrade = !demo && field(&f, "upgrade") == "on";
-    Scope::new(base, expires)
-        .and_then(|s| s.with_upgrade(upgrade))
-        .map_err(|_| invalid())?;
-    let p = Project {
+    if base.is_empty() {
+        return Err("กรุณากรอก URL ขอบเขต เช่น https://example.org/app");
+    }
+    let scope = Scope::new(base, expires).map_err(
+        |_| "ใช้ URL HTTP หรือ HTTPS พร้อมเส้นทางแบบง่าย โดยเว้นพารามิเตอร์ จุดอ้างอิง และข้อมูลล็อกอิน",
+    )?;
+    let upgrade = !demo && !scope.is_https() && field(f, "upgrade") == "on";
+    scope
+        .with_upgrade(upgrade)
+        .map_err(|_| "ตัวเลือกอนุมัติ HTTPS เพิ่มใช้ได้กับ URL ที่เริ่มด้วย http:// และใช้พอร์ต 80")?;
+    Ok(Project {
         id: token(),
         name: name.into(),
         base: base.into(),
@@ -157,9 +196,7 @@ async fn create(
         verified: demo,
         upgrade,
         demo,
-    };
-    app.store.create(&s.user, &p).await?;
-    Ok(Redirect::to(&format!("/p/{}", p.id)))
+    })
 }
 async fn project(
     State(app): State<Shared>,
@@ -174,6 +211,7 @@ async fn project(
         &app.store.scans(&s.user, &id).await?,
         &s.csrf,
         &token(),
+        "",
     )?))
 }
 async fn owner(app: &App, s: &Session, id: &str) -> Answer<Project> {
@@ -188,19 +226,46 @@ async fn verify(
     Path(id): Path<String>,
     h: HeaderMap,
     Form(f): Form<Fields>,
-) -> Answer<Redirect> {
+) -> Answer<Response> {
     let s = mutation(&app, &h, &f)?;
     let p = owner(&app, &s, &id).await?;
     if !p.demo {
-        Scope::new(&p.base, p.expires)
-            .and_then(|s| s.with_upgrade(p.upgrade))
-            .map_err(|_| invalid())?
-            .verify(&p.challenge)
-            .await
-            .map_err(|reason| Error(StatusCode::UNPROCESSABLE_ENTITY, reason))?;
+        let result = match Scope::new(&p.base, p.expires).and_then(|s| s.with_upgrade(p.upgrade)) {
+            Ok(scope) => scope.verify(&p.challenge).await,
+            Err(error) => Err(error),
+        };
+        if let Err(reason) = result {
+            let message = match reason {
+                "verification file missing" => "ไม่พบไฟล์ยืนยัน (HTTP 404) ให้เผยแพร่ไฟล์ที่ URL ด้านล่าง",
+                "verification redirected" => {
+                    "URL ไฟล์ยืนยันเปลี่ยนเส้นทาง ให้ URL ด้านล่างตอบ HTTP 200 โดยตรง"
+                }
+                "verification forbidden" => {
+                    "เว็บไซต์ปฏิเสธการเข้าถึงไฟล์ยืนยัน ให้เปิด URL ด้านล่างได้โดยไม่ต้องเข้าสู่ระบบ"
+                }
+                "verification response too large" => {
+                    "เว็บไซต์ส่งข้อมูลมากเกินไป เช่น หน้า HTML ให้ URL ด้านล่างส่งเฉพาะรหัสยืนยันเป็นข้อความ"
+                }
+                "control verification failed" | "unsupported text encoding" => {
+                    "เนื้อหาไฟล์ยืนยันไม่ตรงกับรหัสด้านล่าง ให้บันทึกเฉพาะรหัสเป็นข้อความ UTF-8"
+                }
+                "public IPv4 destination required" => "เว็บไซต์ต้องเข้าถึงได้ผ่านที่อยู่ IPv4 สาธารณะ",
+                "scope expired" => "ขอบเขตหมดอายุแล้ว กรุณาสร้างโปรเจกต์ใหม่เพื่อขออนุมัติขอบเขต",
+                _ => "เปิด URL ไฟล์ยืนยันไม่ได้ กรุณาตรวจ URL และการตั้งค่าเว็บไซต์แล้วลองอีกครั้ง",
+            };
+            let html = ui::project(
+                &p,
+                "owner",
+                &app.store.scans(&s.user, &id).await?,
+                &s.csrf,
+                &token(),
+                message,
+            )?;
+            return Ok((StatusCode::UNPROCESSABLE_ENTITY, Html(html)).into_response());
+        }
         app.store.verify(&s.user, &id).await?;
     }
-    Ok(Redirect::to(&format!("/p/{id}")))
+    Ok(Redirect::to(&format!("/p/{id}")).into_response())
 }
 async fn member(
     State(app): State<Shared>,
