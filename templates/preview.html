@@ -10,16 +10,6 @@
     <dt>สภาพแวดล้อม</dt><dd>{{ scan.environment }}</dd>
   </dl>
   <p class="scope-instruction">ย้อนกลับไปยังแบบฟอร์ม แล้วเลือก “เริ่มตรวจ”</p>
-  <table class="preflight-table">
-    <thead><tr><th scope="col">กฎ</th><th scope="col">ความพร้อมและเงื่อนไข</th></tr></thead>
-    <tbody>
-      {% for (rule, readiness) in rows %}
-      <tr data-rule="{{ rule.id }}">
-        <th scope="row">{{ rule.id }} {{ rule.name }}</th>
-        <td>{{ readiness }}<br><span class="hint">{{ rule.applicability }}</span></td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  {% include "scan-evidence.html" %}
 </section>
 {% endblock %}

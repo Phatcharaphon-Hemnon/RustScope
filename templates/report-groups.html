@@ -1,0 +1,24 @@
+{% macro render(groups, full) %}
+{% for group in groups %}
+{% let rule = group.rule %}
+{% if group.observations.len() > 1 %}
+<section class="observation-group">
+<h3>{{ rule.id }} {{ rule.name }}</h3>
+{% if group.show_guidance %}
+<dl>{% include "report-guidance.html" %}</dl>
+{% include "report-reference.html" %}
+{% endif %}
+<table class="group-observations">
+<thead><tr><th scope="col">รายการที่ตรวจ</th></tr></thead>
+<tbody>
+{% let show_guidance = false %}
+{% for obs in group.observations %}<tr><td>{% include "report-result.html" %}</td></tr>{% endfor %}
+</tbody>
+</table>
+</section>
+{% else %}
+{% let show_guidance = group.show_guidance %}
+{% for obs in group.observations %}{% include "report-result.html" %}{% endfor %}
+{% endif %}
+{% endfor %}
+{% endmacro %}

@@ -109,7 +109,6 @@
   .result + form { @apply mt-5; }
   .audit-nav a { @apply inline-block py-1; }
   .report-shell { @apply min-w-0; }
-  .coverage-count { @apply inline-block rounded-lg bg-accent-soft px-3 py-2 text-accent-strong; }
   .review-form { @apply rounded-xl border border-line bg-accent-soft p-4; }
   #compare th[scope=row] { white-space: nowrap; }
   #compare td:last-child { width: 24%; }
@@ -135,8 +134,83 @@
   .result { border-top: 1px solid #d5dfeb; padding-top: .75rem; }
   .scan-meta > summary { display: none; }
   .scan-meta::details-content { content-visibility: visible; }
-  .scan-meta dl, .coverage-count, code { background: transparent; padding: 0; }
+  .scan-meta dl, code { background: transparent; padding: 0; }
   h1, h2, h3 { break-after: avoid; }
   .result, tr { break-inside: avoid; }
   thead { display: table-header-group; }
+}
+
+@layer components {
+  .report-overview { @apply space-y-3; }
+  .report-counts, .severity-counts { @apply m-0 flex list-none flex-wrap gap-2 p-0; }
+  .report-counts li, .severity-counts li { @apply rounded-lg bg-accent-soft px-3 py-1.5; }
+  .report-counts strong, .severity-counts strong { @apply tabular-nums; }
+}
+
+@layer components {
+  .result-bucket { @apply my-3 rounded-xl border border-line p-3; }
+}
+
+@layer components {
+  .observation { @apply mt-2 p-0; }
+  .observation-summary { @apply relative p-3 pl-8; }
+  .observation-summary::marker { content: ""; }
+  .observation-summary::-webkit-details-marker { display: none; }
+  .observation-summary::before {
+    content: "";
+    @apply absolute top-5 left-3 size-2 border-r-2 border-b-2 border-accent;
+    transform: rotate(-45deg);
+  }
+  .observation[open] > .observation-summary::before { transform: rotate(45deg); }
+  .observation-line { @apply grid justify-items-start gap-1 sm:flex sm:items-center sm:gap-2; }
+  .observation-location { @apply min-w-0 max-w-full; }
+  .observation > dl { @apply px-3 pb-3; }
+  .report-badge { @apply rounded-md bg-accent-soft px-2 py-0.5 text-sm font-semibold text-accent-strong; }
+  .report-badge[data-outcome="Finding"], .report-badge[data-severity="สูง"] { @apply bg-danger-soft text-danger; }
+  .report-badge[data-outcome="Insufficient"] { color: #683c08; background: #fff1d2; }
+  .report-badge[data-outcome="Passed"] { color: #145640; background: #e5f5eb; }
+}
+
+@media screen and (min-width: 48rem) {
+  .observation-line > strong, .report-badge { white-space: nowrap; }
+  .observation-location { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
+
+@layer components {
+  .report-reference { @apply m-3 rounded-lg bg-accent-soft p-3; }
+  .report-reference dl { @apply text-sm; }
+}
+
+@layer components {
+  .observation-group { @apply mt-3 rounded-xl border border-line p-3; }
+  .observation-group > .report-reference { @apply mx-0; }
+  .group-observations td { @apply px-0; }
+  .group-observations .observation { @apply mt-0; }
+  .group-observations .observation-line > strong { @apply sr-only; }
+}
+
+@layer components {
+  .report-controls { @apply flex flex-wrap gap-2; }
+  .report-controls a { @apply flex min-h-11 items-center rounded-lg border border-control bg-surface px-3 font-semibold; }
+  .report-counts .finding-count { @apply bg-danger-soft text-danger; }
+  .report-counts .insufficient-count { color: #683c08; background: #fff1d2; }
+  .report-counts .passed-count { color: #145640; background: #e5f5eb; }
+}
+
+@media print {
+  .report-shell details::details-content { content-visibility: visible; }
+  .observation-group, .result-bucket, .report-reference {
+    border: 0;
+    margin-inline: 0;
+    padding-inline: 0;
+    background: transparent;
+  }
+  .observation-summary { padding: .3rem 0; }
+  .observation-summary::before { content: none; }
+}
+
+@layer components {
+  .preflight-table caption { @apply mb-2 text-left font-bold text-ink; }
+  .preflight-table + .scope-instruction { @apply mt-4 text-sm; }
+  .missing-input { @apply my-2 rounded-lg border border-line bg-accent-soft px-3 py-2; }
 }

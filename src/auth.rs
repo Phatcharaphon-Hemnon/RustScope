@@ -1,8 +1,10 @@
 use axum::http::HeaderMap;
+use ring::pbkdf2;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
+use std::num::NonZeroU32;
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::Path;
 use std::sync::Mutex;
@@ -44,17 +46,77 @@ pub fn add_account(dir: &Path, user: &str) -> anyhow::Result<()> {
         label(user) && !user.starts_with('.'),
         "invalid account name"
     );
-    state_dir(&dir.join("accounts"))?;
     let key = token();
+    save_account(dir, user, &digest(&key))?;
+    println!("{key}");
+    Ok(())
+}
+
+const PASSWORD_ROUNDS: NonZeroU32 = match NonZeroU32::new(600_000) {
+    Some(rounds) => rounds,
+    None => panic!("password iteration count must be nonzero"),
+};
+
+pub fn valid_registration(user: &str, password: &str) -> bool {
+    label(user) && !user.starts_with('.') && password.len() <= 256 && password.chars().count() >= 12
+}
+
+pub fn register(dir: &Path, user: &str, password: &str) -> std::io::Result<()> {
+    if !valid_registration(user, password) {
+        return Err(std::io::ErrorKind::InvalidInput.into());
+    }
+    let salt = Uuid::new_v4();
+    let mut hash = [0; 32];
+    pbkdf2::derive(
+        pbkdf2::PBKDF2_HMAC_SHA256,
+        PASSWORD_ROUNDS,
+        salt.as_bytes(),
+        password.as_bytes(),
+        &mut hash,
+    );
+    save_account(
+        dir,
+        user,
+        &format!("{}:{}", salt.simple(), hex::encode(hash)),
+    )
+}
+
+fn save_account(dir: &Path, user: &str, hash: &str) -> std::io::Result<()> {
+    let accounts = dir.join("accounts");
+    state_dir(&accounts)?;
+    let pending = accounts.join(format!(".{}", token()));
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
         .mode(0o600)
-        .open(dir.join("accounts").join(user))?;
-    file.write_all(digest(&key).as_bytes())?;
-    // Printed only by the local provisioning command, never by the web service.
-    println!("{key}");
-    Ok(())
+        .open(&pending)?;
+    // Publish the completed credential without overwriting an existing account.
+    let result = file
+        .write_all(hash.as_bytes())
+        .and_then(|()| file.sync_all())
+        .and_then(|()| fs::hard_link(&pending, accounts.join(user)));
+    let _ = fs::remove_file(pending);
+    result
+}
+
+fn verified_password(saved: &str, password: &str) -> bool {
+    let Some((salt, hash)) = saved.split_once(':') else {
+        // CLI accounts use generated, high-entropy tokens.
+        let password = password.trim();
+        return password.len() == 32 && saved == digest(password);
+    };
+    let (Ok(salt), Ok(hash)) = (Uuid::parse_str(salt), hex::decode(hash)) else {
+        return false;
+    };
+    hash.len() == 32
+        && pbkdf2::verify(
+            pbkdf2::PBKDF2_HMAC_SHA256,
+            PASSWORD_ROUNDS,
+            salt.as_bytes(),
+            password.as_bytes(),
+            &hash,
+        )
+        .is_ok()
 }
 
 #[derive(Clone)]
@@ -69,13 +131,17 @@ pub struct Sessions(Mutex<HashMap<String, Session>>);
 
 impl Sessions {
     pub fn login(&self, dir: &Path, user: &str, password: &str) -> Option<String> {
-        if !label(user) || user.starts_with('.') || password.len() != 32 {
+        if !label(user) || user.starts_with('.') || password.len() > 256 {
             return None;
         }
         let saved = fs::read_to_string(dir.join("accounts").join(user)).ok()?;
-        if saved != digest(password) {
+        if !verified_password(&saved, password) {
             return None;
         }
+        self.start(user)
+    }
+
+    pub fn start(&self, user: &str) -> Option<String> {
         let key = token();
         let mut sessions = self.0.lock().ok()?;
         sessions.retain(|_, s| s.expires > now());

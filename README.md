@@ -7,13 +7,14 @@ RustScope assesses owner-approved web resources and release evidence, produces T
 Use Linux, a current stable Rust toolchain with Cargo, a C toolchain, and Python 3 for the demo. The verified build used rustc 1.99.1. The first build needs access to crates.io. After fetching the locked dependencies, builds and tests can run with Cargo’s `--offline` flag.
 
 ```sh
-cargo build --locked
-./target/debug/rustscope account owner
-./target/debug/rustscope account reviewer
-./target/debug/rustscope
+cargo run --locked
 ```
 
-Each account command prints a generated login credential once. Run those two commands on first setup. Open **http://localhost:3100** or **http://127.0.0.1:3100** and sign in as `owner`. Set `RUSTSCOPE_STATE` to select the private state directory (default `./state`) and `RUSTSCOPE_PORT` to change the port. Run one server per state directory. Keep the SQLite database and its mode-0600 encryption key together in a protected backup with the account files. Losing the key prevents URL recovery.
+Open **http://localhost:3100**, choose **สมัครบัญชี**, and create an account with a username and password. RustScope signs you in automatically. On later visits, use **เข้าสู่ระบบ** with the same credentials. Each account starts with access to its own projects and can be invited to other projects by their owners.
+
+Existing accounts can sign in with their current credentials. To provision an account from the terminal, run `cargo run --locked -- account USER`. The command prints its generated password once.
+
+Set `RUSTSCOPE_STATE` to select the private state directory (default `./state`) and `RUSTSCOPE_PORT` to change the port. Run one server per state directory. Keep the SQLite database and its mode-0600 encryption key together in a protected backup with the account files. Losing the key prevents URL recovery.
 
 ## Update the interface styles
 
@@ -114,7 +115,7 @@ Root owned the manifest and lockfile, routes, authentication, worker integration
 
 ## Operating limits
 
-- The web service binds to loopback and uses local provisioned accounts. Sessions expire after one hour and on process restart. The worker handles one job at a time.
+- The web service binds to loopback and lets local users register accounts. Sessions expire after one hour and on process restart. The worker handles one job at a time.
 - Collection uses explicit public IPv4 destinations, simple query-free paths, up to four GET requests, 12 seconds overall per collection and 512 KiB per response. HTTP ownership challenges depend on the integrity of the network path. The production collector was exercised with isolated fixtures, without scanning a third-party site.
 - The checks inspect server-rendered evidence. JavaScript execution, actual browser loading of scripts, digest verification against fetched script bytes, and vulnerability reachability require separate evidence. RustSec coverage is bounded by the pinned snapshot, supported crates.io sources and supported version semantics. Prerelease-only input yields insufficient evidence.
 - Cross-round matching requires the same approved target, comparable policy, environment, rule version and resource identity. Missing resources and ambiguous forms can remain unresolved until comparable evidence becomes available.

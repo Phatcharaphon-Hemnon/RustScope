@@ -50,14 +50,20 @@
     </label>
     {% else %}
     <label>URL เป้าหมาย <input name="target" type="url" maxlength="2048" value="{{ p.base }}" required></label>
+    <p class="hint">เริ่มตรวจด้วย URL ได้เลย ส่วน Cargo.lock และนโยบายใช้เพิ่มการตรวจเฉพาะกฎ</p>
     {% endif %}
+    <details class="subpanel">
+      <summary>กฎที่ตรวจได้และหลักฐานเพิ่ม</summary>
+      {% include "scan-evidence.html" %}
+    </details>
     <details class="subpanel"><summary>ตั้งค่าขั้นสูงและแนบ Cargo.lock</summary><fieldset>
       <legend>นโยบายและหลักฐานประกอบ</legend>
-      <label class="check"><input name="download" type="checkbox"{% if p.demo %} checked{% endif %}> เป้าหมายเป็นไฟล์ดาวน์โหลด (A02-01)</label>
-      <label>อายุ HSTS ขั้นต่ำ (วินาที, A02-02) <input name="hsts_min" type="number" min="0"{% if p.demo %} value="3600"{% endif %}></label>
-      <label>รหัสฟอร์มที่คาดว่าจะพบ (HTML id, A04-01/02) <input name="expected_form"{% if p.demo %} value="login"{% endif %}></label>
-      <label class="check"><input name="sri" type="checkbox"{% if p.demo %} checked{% endif %}> ต้องใช้ SRI สำหรับสคริปต์ภายนอก (A08-04)</label>
-      <label>เนื้อหา Cargo.lock (สูงสุด 256 KiB, A03-01/02) <textarea name="lock" rows="4" spellcheck="false"></textarea></label>
+      <label class="check"><input name="download" type="checkbox"{% if p.demo %} checked{% endif %}> เป้าหมายเป็นไฟล์ดาวน์โหลด</label>
+      <label>อายุ HSTS ขั้นต่ำ (วินาที) <input name="hsts_min" type="number" min="0"{% if p.demo %} value="3600"{% endif %}></label>
+      <label>รหัสฟอร์มที่คาดว่าจะพบ (HTML id) <input name="expected_form"{% if p.demo %} value="login"{% endif %}></label>
+      <label class="check"><input name="sri" type="checkbox"{% if p.demo %} checked{% endif %}> ต้องใช้ SRI สำหรับสคริปต์ภายนอก</label>
+      <label>เนื้อหา Cargo.lock (ไม่บังคับ สูงสุด 256 KiB) <textarea name="lock" rows="4" spellcheck="false" aria-describedby="lock-hint"></textarea></label>
+      <p id="lock-hint" class="hint"><code>Cargo.lock</code> คือไฟล์ที่ Cargo บันทึกรุ่นของแพ็กเกจที่ใช้จริง ใช้เสริมการตรวจแพ็กเกจของโปรเจกต์ Rust เท่านั้น เว้นว่างได้เมื่อตรวจด้วย URL</p>
       {% if p.demo %}<p class="hint">ถ้าเว้น Cargo.lock ว่าง ระบบใช้ไฟล์สาธิต</p>{% endif %}
     </fieldset></details>
     <div class="actions"><button>เริ่มตรวจ</button> <button name="preview" value="on">ตรวจความพร้อม</button></div>
@@ -77,5 +83,6 @@
   </form>
 </details>
 {% endif %}
+{% let catalog_open = false %}
 {% include "catalog.html" %}
 {% endblock %}

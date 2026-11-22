@@ -4,9 +4,10 @@ use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
 
-const VULNERABILITIES: &str = "A03-01";
-const MAINTENANCE: &str = "A03-02";
+pub(crate) const VULNERABILITIES: &str = "A03-01";
+pub(crate) const MAINTENANCE: &str = "A03-02";
 const RULES: [&str; 2] = [VULNERABILITIES, MAINTENANCE];
+const MISSING_LOCKFILE: &str = "ไม่มีไฟล์ Cargo.lock";
 
 static OFFLINE_SNAPSHOT: LazyLock<Option<Snapshot>> = LazyLock::new(|| {
     serde_json::from_str::<Snapshot>(include_str!("../fixtures/advisories/rustsec.json"))
@@ -54,9 +55,16 @@ pub fn evaluate(lock: Option<&str>) -> Vec<Observation> {
     evaluate_snapshot(lock, OFFLINE_SNAPSHOT.as_ref())
 }
 
+pub(crate) fn is_missing_lockfile(observation: &Observation) -> bool {
+    RULES.contains(&observation.rule.as_str())
+        && observation.item == "Cargo.lock"
+        && observation.outcome == Outcome::Insufficient
+        && observation.observed == MISSING_LOCKFILE
+}
+
 fn evaluate_snapshot(lock: Option<&str>, snapshot: Option<&Snapshot>) -> Vec<Observation> {
     let Some(lock) = lock else {
-        return insufficient("ไม่มีไฟล์ Cargo.lock");
+        return insufficient(MISSING_LOCKFILE);
     };
     let Ok(lockfile) = toml::from_str::<Lockfile>(lock) else {
         return insufficient("อ่านข้อมูลแพ็กเกจจาก Cargo.lock ไม่ได้");

@@ -1,8 +1,9 @@
 {% extends "base.html" %}
+{% import "report-groups.html" as results %}
 {% block title %}รายงาน {{ scan.release }} · RustScope{% endblock %}
 {% block refresh %}{% if pending %}<meta http-equiv="refresh" content="4">{% endif %}{% endblock %}
 {% block content %}
-<nav class="no-print audit-nav"><a href="/p/{{ p.id }}">กลับไปยังโปรเจกต์</a>{% if !pending %} · <a href="#results">ผลตรวจ</a> · <a href="#compare">ตรวจซ้ำ</a> · <a href="#reviews">การทบทวน</a> · <a href="#catalog">ทะเบียนกฎ</a>{% endif %}</nav>
+<nav class="no-print audit-nav"><a href="/p/{{ p.id }}">กลับไปยังโปรเจกต์</a>{% if !pending %} · <a href="#results">ผลตรวจ</a> · <a href="#compare">ตรวจซ้ำ</a> · <a href="#reviews">การทบทวน</a> · <a href="/catalog">ทะเบียนกฎ</a>{% endif %}</nav>
 <article class="report-shell" data-status="{{ scan.status }}">
 {% if pending %}
 <section class="panel waiting" role="status" aria-live="polite">
@@ -15,52 +16,83 @@
 {% else %}
 <h1>รายงานการตรวจประเมิน</h1>
 <p class="subtitle">{{ p.name }} · {{ scan.release }}</p>
-<details class="panel scan-meta"><summary>ข้อมูลรอบตรวจ</summary><dl>
+<nav class="no-print report-controls" aria-label="มุมมองรายงาน">
+{% if view.findings_only %}<a href="/p/{{ p.id }}/s/{{ scan.id }}{% if view.full %}?view=full{% endif %}">ทุกผลตรวจ</a>
+{% else %}<a href="?show=findings{% if view.full %}&amp;view=full{% endif %}">เฉพาะข้อที่พบ</a>{% endif %}
+{% if view.full && !view.findings_only %}<a href="/p/{{ p.id }}/s/{{ scan.id }}">ฉบับย่อ</a>
+{% else %}<a href="?view=full">ฉบับเต็มสำหรับพิมพ์</a>{% endif %}
+</nav>
+<section class="panel report-overview" aria-label="สรุปผลอัตโนมัติ">
+<ul class="report-counts" aria-label="จำนวนตามผลตรวจ">
+<li class="finding-count"><strong>{{ outcome_counts.findings }}</strong> พบตามกฎ</li>
+<li class="insufficient-count"><strong>{{ outcome_counts.insufficient }}</strong> ข้อมูลไม่พอ</li>
+<li class="passed-count"><strong>{{ outcome_counts.passed }}</strong> ผ่านเฉพาะกฎ</li>
+<li><strong>{{ outcome_counts.other }}</strong> อื่น ๆ</li>
+</ul>
+{% if !severity_counts.is_empty() %}
+<p class="hint">ความรุนแรงของกฎ</p>
+<ul class="severity-counts" aria-label="จำนวนตามความรุนแรงของกฎ">
+{% for (severity, count) in severity_counts %}<li><strong>{{ count }}</strong> {{ severity }}</li>{% endfor %}
+</ul>
+{% endif %}
+</section>
+<details class="panel scan-meta"{% if view.full %} open{% endif %}><summary>ข้อมูลรอบตรวจ</summary><dl>
 {% if p.demo %}<dt>โหมด</dt><dd>สาธิตออฟไลน์ด้วยข้อมูลจำลอง</dd>{% endif %}
-<dt>รหัสโปรเจกต์</dt><dd><code>{{ p.id }}</code></dd>
-<dt>รหัสรอบตรวจ</dt><dd><code>{{ scan.id }}</code></dd>
+<dt>โปรเจกต์</dt><dd><code>{{ p.id }}</code></dd>
+<dt>รอบตรวจ</dt><dd><code>{{ scan.id }}</code></dd>
 <dt>สถานะ</dt><dd>{{ crate::ui::scan_status(scan.status.as_str()) }}</dd>
 <dt>เป้าหมาย</dt><dd><code>{{ target }}</code>{% if !p.demo %} · แสดงต้นทางและลายนิ้วมือของเส้นทาง{% endif %}</dd>
 <dt>สภาพแวดล้อม</dt><dd>{{ scan.environment }}</dd>
-<dt>อนุมัติ HTTPS เพิ่มสำหรับขอบเขต HTTP เดิม</dt><dd>{% if p.upgrade %}ใช่{% else %}ไม่ใช่{% endif %}</dd>
-<dt>เวลาเริ่มรอบ (Unix วินาที UTC)</dt><dd>{{ scan.at }}</dd>
-{% if scan.observed_at > 0 %}<dt>เวลาบันทึกหลักฐานเว็บ (Unix วินาที UTC)</dt><dd>{{ scan.observed_at }}</dd>{% endif %}
+<dt>ขอบเขต HTTPS เพิ่ม</dt><dd>{% if p.upgrade %}ใช่{% else %}ไม่ใช่{% endif %}</dd>
+<dt>เริ่มตรวจ</dt><dd>{{ crate::ui::utc_date(scan.at) }}</dd>
+{% if scan.observed_at > 0 %}<dt>เก็บหลักฐานเว็บ</dt><dd>{{ crate::ui::utc_date(scan.observed_at) }}</dd>{% endif %}
 <dt>รุ่นชุดกฎ</dt><dd>{{ scan.version }}</dd>
 <dt>ไฟล์ดาวน์โหลด</dt><dd>{% if scan.policy.download %}ใช่{% else %}ไม่ใช่{% endif %}</dd>
-<dt>อายุ HSTS ขั้นต่ำ</dt><dd>{% match scan.policy.hsts_min %}{% when Some with (age) %}{{ age }} วินาที{% when None %}ไม่กำหนด{% endmatch %}</dd>
-<dt>ฟอร์มที่คาดว่าจะพบ</dt><dd>{% if scan.policy.expected_form.is_some() %}ระบุ HTML id แล้ว{% else %}ไม่กำหนด{% endif %}</dd>
+<dt>HSTS ขั้นต่ำ</dt><dd>{% match scan.policy.hsts_min %}{% when Some with (age) %}{{ age }} วินาที{% when None %}ไม่กำหนด{% endmatch %}</dd>
+<dt>ฟอร์มที่คาด</dt><dd>{% if scan.policy.expected_form.is_some() %}ระบุ HTML id แล้ว{% else %}ไม่กำหนด{% endif %}</dd>
 <dt>ต้องใช้ SRI</dt><dd>{% if scan.policy.sri %}ใช่{% else %}ไม่ใช่{% endif %}</dd>
 </dl>
+<details class="report-reference"{% if view.full %} open{% endif %}><summary>เวลาระบบ (Unix UTC)</summary>
+<dl>
+<dt>เริ่มตรวจ</dt><dd>{{ scan.at }}</dd>
+{% if scan.observed_at > 0 %}<dt>เก็บหลักฐานเว็บ</dt><dd>{{ scan.observed_at }}</dd>{% endif %}
+</dl>
+</details>
 </details>
 {% endif %}
 {% if !pending %}
-<section class="panel">
-<h2>ความครอบคลุม</h2>
-<p class="coverage-count"><strong>ประเมินได้ {{ assessed_total }} / {{ canonical_total }} กฎมาตรฐาน</strong></p>
+<details class="panel coverage-panel"{% if view.full %} open{% endif %}>
+<summary>ความครอบคลุม · ประเมินได้ {{ assessed_total }} / {{ canonical_total }} กฎมาตรฐาน</summary>
 <table>
 <thead><tr><th scope="col">วิธี</th><th scope="col">กฎที่ประเมินได้ / ทั้งหมด</th><th scope="col">กฎอัตโนมัติที่มีผลบันทึก</th></tr></thead>
 <tbody>{% for row in coverage %}
 <tr><th scope="row">{% if row.method != "X" %}{{ row.method }} · {% endif %}{{ row.description }}</th><td>{{ row.assessed }} / {{ row.total }}</td><td>{{ row.executed }}</td></tr>
 {% endfor %}</tbody>
 </table>
-</section>
+</details>
 <section id="results" class="panel">
 <h2>ผลตรวจอัตโนมัติ</h2>
-{% for (obs, rule) in observations %}
-<section class="result" data-rule="{{ rule.id }}" data-outcome="{{ "{:?}"|format(obs.outcome) }}">
-<h3>{{ rule.id }} {{ rule.name }} · {{ obs.outcome.thai() }}</h3>
-<dl>
-<dt>หมวด OWASP / รุ่นกฎ</dt><dd>{{ rule.category }} / {{ rule.version }}</dd>
-<dt>ชนิดหลักฐาน / ตำแหน่ง</dt><dd>{{ rule.inputs }} / <code>{{ obs.item }}</code></dd>
-<dt>สิ่งที่คาดและเกณฑ์ตัดสิน</dt><dd>{{ rule.evidence }}</dd>
-<dt>สิ่งที่พบและหลักฐานที่ปกปิดแล้ว</dt><dd>{{ obs.observed }}</dd>
-<dt>ผลกระทบที่อาจเกิดขึ้น</dt><dd>{{ rule.impact }}</dd>
-<dt>ความรุนแรง / ความมั่นใจของกฎ</dt><dd>{{ rule.severity }} / {{ rule.confidence }}</dd>
-<dt>วิธีแก้</dt><dd>{{ rule.remediation }}</dd>
-<dt>เกณฑ์ยืนยันการแก้ไข</dt><dd>{{ rule.closure }}</dd>
-</dl>
-</section>
-{% else %}<p>รอบนี้ไม่มีผลตรวจอัตโนมัติ</p>{% endfor %}
+{% if view.findings_only && finding_groups.is_empty() %}
+<p>รอบนี้ไม่มีรายการที่พบตามกฎ</p>
+{% elif finding_groups.is_empty() && insufficient_groups.is_empty() && passed_groups.is_empty() && other_groups.is_empty() && missing_lockfile_rules.is_empty() %}
+<p>รอบนี้ไม่มีผลตรวจอัตโนมัติ</p>
+{% endif %}
+{% call results::render(finding_groups, view.full) %}
+{% if !view.findings_only %}
+{% if !missing_lockfile_rules.is_empty() %}
+<p class="missing-input">ไม่ได้ตรวจ: ไม่มี Cargo.lock
+  <span class="hint">({% for rule in missing_lockfile_rules %}{% if !loop.first %}, {% endif %}<span data-rule="{{ rule }}" data-outcome="Insufficient">{{ rule }}</span>{% endfor %})</span>
+</p>
+{% endif %}
+{% call results::render(insufficient_groups, view.full) %}
+{% if !passed_groups.is_empty() %}
+<details class="result-bucket"{% if view.full %} open{% endif %}>
+<summary>ผ่านเฉพาะกฎ ({{ outcome_counts.passed }})</summary>
+{% call results::render(passed_groups, view.full) %}
+</details>
+{% endif %}
+{% call results::render(other_groups, view.full) %}
+{% endif %}
 </section>
 <section id="compare" class="panel">
 <h2>ผลการตรวจซ้ำ</h2>
@@ -84,15 +116,16 @@
 <h3>{{ rule.id }} {{ rule.name }} · {{ crate::ui::decision_label(review.decision.as_str()) }}</h3>
 <dl>
 <dt>หมวด OWASP / รุ่นกฎ</dt><dd>{{ rule.category }} / {{ rule.version }}</dd>
-<dt>รุ่นที่ทบทวน</dt><dd>{{ scan.release }}</dd>
+<dt>รุ่นที่ตรวจ</dt><dd>{{ scan.release }}</dd>
 <dt>เกณฑ์ตัดสิน</dt><dd>{{ rule.evidence }}</dd>
 <dt>ผู้ทบทวน</dt><dd>{{ review.reviewer }}</dd>
 <dt>เหตุผล</dt><dd>{{ review.rationale }}</dd>
 <dt>หลักฐาน</dt><dd>{{ review.evidence }}</dd>
-<dt>เวลาบันทึก (Unix วินาที UTC)</dt><dd>{{ review.at }}</dd>
+<dt>บันทึกเมื่อ</dt><dd>{{ crate::ui::utc_date(review.at) }}</dd>
 <dt>วิธีแก้</dt><dd>{{ rule.remediation }}</dd>
-<dt>เกณฑ์ยืนยันการแก้ไข</dt><dd>{{ rule.closure }}</dd>
+<dt>เกณฑ์ปิดผล</dt><dd>{{ rule.closure }}</dd>
 </dl>
+<details class="report-reference"{% if view.full %} open{% endif %}><summary>เวลาระบบ (Unix UTC)</summary><code>{{ review.at }}</code></details>
 </section>
 {% else %}<p>ยังไม่มีคำวินิจฉัยในรอบนี้</p>{% endfor %}
 {% if may_review %}
@@ -118,7 +151,7 @@
 </form>
 {% endif %}
 </section>
-{% include "catalog.html" %}
+<p id="catalog" class="no-print"><a href="/catalog">เปิดทะเบียนกฎมาตรฐานและส่วนขยาย</a></p>
 {% endif %}
 </article>
 {% endblock %}

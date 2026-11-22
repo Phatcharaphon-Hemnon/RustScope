@@ -1,4 +1,4 @@
-<details id="catalog" class="panel catalog-panel">
+<details id="catalog" class="panel catalog-panel"{% if catalog_open %} open{% endif %}>
 <summary>ดูกฎมาตรฐาน (60) และส่วนขยาย</summary>
 <p class="hint">A ตรวจหลักฐานโดยตรง · S วิเคราะห์ซอร์สโค้ดและทบทวนโดยนักพัฒนา · E ทบทวนตามนโยบายหรือหลักฐานภายใน</p>
 {% for rule in rules %}

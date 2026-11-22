@@ -8,7 +8,9 @@ anyhow = "1"
 askama = "0.14"
 axum = "0.8"
 base64 = "0.22"
+chrono = { version = "0.4", default-features = false }
 hex = "0.4"
+regex = "1"
 ring = "0.17"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
 scraper = "0.24"
@@ -21,4 +23,3 @@ tokio = { version = "1", features = ["full"] }
 toml = "1"
 url = "2"
 uuid = { version = "1", features = ["v4"] }
-regex = "1"

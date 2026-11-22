@@ -11,7 +11,7 @@ use anyhow::Context;
 use auth::{Session, Sessions, label, now, token};
 use axum::{
     Form, Router,
-    extract::{DefaultBodyLimit, Path, Request, State},
+    extract::{DefaultBodyLimit, Path, Query, Request, State},
     http::{HeaderMap, HeaderValue, Method, StatusCode},
     middleware::{self, Next},
     response::{Html, IntoResponse, Redirect, Response},
@@ -101,19 +101,66 @@ async fn login_page() -> Answer<Html<String>> {
     Ok(Html(ui::login()?))
 }
 async fn login(State(app): State<Shared>, Form(f): Form<Fields>) -> Answer<Response> {
-    let key = app
-        .sessions
-        .login(&app.accounts, field(&f, "user"), field(&f, "password"))
-        .ok_or_else(denied)?;
+    let key = tokio::task::spawn_blocking(move || {
+        app.sessions.login(
+            &app.accounts,
+            field(&f, "user"),
+            f.get("password").map_or("", String::as_str),
+        )
+    })
+    .await
+    .context("login task failed")?
+    .ok_or_else(denied)?;
+    signed_in(&key)
+}
+fn signed_in(key: &str) -> Answer<Response> {
     let mut res = Redirect::to("/").into_response();
     res.headers_mut().insert(
         "set-cookie",
         HeaderValue::from_str(&format!(
             "rustscope={key}; HttpOnly; SameSite=Strict; Path=/; Max-Age=3600"
         ))
-        .unwrap(),
+        .context("invalid session cookie")?,
     );
     Ok(res)
+}
+async fn registration_page() -> Answer<Html<String>> {
+    Ok(Html(ui::registration("", "")?))
+}
+async fn register(State(app): State<Shared>, Form(f): Form<Fields>) -> Answer<Response> {
+    let user = field(&f, "user");
+    let password = f.get("password").map_or("", String::as_str);
+    let error_response = |status, message| -> Answer<Response> {
+        Ok((status, Html(ui::registration(user, message)?)).into_response())
+    };
+    if !auth::valid_registration(user, password) {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "กรุณาตรวจชื่อบัญชีและความยาวรหัสผ่านตามคำแนะนำ",
+        );
+    }
+    if f.get("password") != f.get("confirm_password") {
+        return error_response(StatusCode::BAD_REQUEST, "รหัสผ่านทั้งสองช่องไม่ตรงกัน");
+    }
+    let dir = app.accounts.clone();
+    let account = user.to_owned();
+    let password = password.to_owned();
+    match tokio::task::spawn_blocking(move || auth::register(&dir, &account, &password))
+        .await
+        .context("registration task failed")?
+    {
+        Ok(()) => {
+            let key = app
+                .sessions
+                .start(user)
+                .context("could not start session")?;
+            signed_in(&key)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            error_response(StatusCode::CONFLICT, "ชื่อบัญชีนี้ถูกใช้แล้ว")
+        }
+        Err(error) => Err(anyhow::Error::from(error).into()),
+    }
 }
 async fn home(State(app): State<Shared>, h: HeaderMap) -> Answer<Response> {
     let Ok(s) = session(&app, &h) else {
@@ -130,6 +177,11 @@ async fn home(State(app): State<Shared>, h: HeaderMap) -> Answer<Response> {
     )?)
     .into_response())
 }
+async fn catalog_page(State(app): State<Shared>, h: HeaderMap) -> Answer<Html<String>> {
+    session(&app, &h)?;
+    Ok(Html(ui::catalog_page()?))
+}
+
 async fn create(
     State(app): State<Shared>,
     h: HeaderMap,
@@ -369,9 +421,16 @@ async fn scan(
     Ok(Redirect::to(&format!("/p/{id}/s/{actual}")).into_response())
 }
 
+#[derive(Deserialize)]
+struct ReportQuery {
+    view: Option<String>,
+    show: Option<String>,
+}
+
 async fn report(
     State(app): State<Shared>,
     Path((id, sid)): Path<(String, String)>,
+    Query(query): Query<ReportQuery>,
     h: HeaderMap,
 ) -> Answer<Html<String>> {
     let s = session(&app, &h)?;
@@ -382,14 +441,18 @@ async fn report(
         .position(|v| v.id == sid)
         .ok_or_else(denied)?;
     let reviews = app.store.reviews(&s.user, &id, &sid).await?;
-    Ok(Html(ui::report(
-        &p,
-        &role,
-        &history[index],
-        &history[..=index],
-        &reviews,
-        &s.csrf,
-    )?))
+    let view = ui::ReportView {
+        full: query.view.as_deref() == Some("full"),
+        findings_only: query.show.as_deref() == Some("findings"),
+    };
+    let scan = &history[index];
+    let rounds = &history[..=index];
+    let html = if view.full || view.findings_only {
+        ui::report_with_view(&p, &role, scan, rounds, &reviews, &s.csrf, view)?
+    } else {
+        ui::report(&p, &role, scan, rounds, &reviews, &s.csrf)?
+    };
+    Ok(Html(html))
 }
 
 const REASONS: [&str; 5] = [
@@ -607,6 +670,8 @@ async fn main() -> anyhow::Result<()> {
     let router = Router::new()
         .route("/", get(home))
         .route("/login", get(login_page).post(login))
+        .route("/register", get(registration_page).post(register))
+        .route("/catalog", get(catalog_page))
         .route("/projects", post(create))
         .route("/p/{id}", get(project))
         .route("/p/{id}/member", post(member))

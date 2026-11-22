@@ -1,11 +1,13 @@
 use crate::{
     REASONS,
+    dependencies::{MAINTENANCE, VULNERABILITIES, is_missing_lockfile},
     domain::{Change, Observation, Outcome, Round, Rule, catalog, compare, extensions},
     model::{Project, Review, Scan},
     scope::{Scope, safe_url},
     web::redacted_location,
 };
 use askama::Template;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Template)]
 #[template(path = "login.html")]
@@ -13,6 +15,17 @@ struct Login;
 
 pub fn login() -> anyhow::Result<String> {
     Ok(Login.render()?)
+}
+
+#[derive(Template)]
+#[template(path = "register.html")]
+struct Registration<'a> {
+    user: &'a str,
+    error: &'a str,
+}
+
+pub fn registration(user: &str, error: &str) -> anyhow::Result<String> {
+    Ok(Registration { user, error }.render()?)
 }
 
 #[derive(Template)]
@@ -43,6 +56,23 @@ pub fn home(projects: &[Project], csrf: &str, form: ProjectForm<'_>) -> anyhow::
 }
 
 #[derive(Template)]
+#[template(path = "catalog-page.html")]
+struct CatalogPage {
+    rules: Vec<Rule>,
+}
+
+pub fn catalog_page() -> anyhow::Result<String> {
+    Ok(CatalogPage {
+        rules: visible_rules(),
+    }
+    .render()?)
+}
+
+fn visible_rules() -> Vec<Rule> {
+    catalog().into_iter().chain(extensions()).collect()
+}
+
+#[derive(Template)]
 #[template(path = "project.html")]
 struct ProjectPage<'a> {
     p: &'a Project,
@@ -56,6 +86,7 @@ struct ProjectPage<'a> {
     csrf: &'a str,
     request_id: &'a str,
     rules: Vec<Rule>,
+    evidence: EvidenceGroups<'a>,
 }
 
 pub fn project(
@@ -73,6 +104,7 @@ pub fn project(
     } else {
         String::new()
     };
+    let rules = visible_rules();
     Ok(ProjectPage {
         p,
         owner,
@@ -92,13 +124,10 @@ pub fn project(
         scans,
         csrf,
         request_id,
-        rules: visible_rules(),
+        evidence: evidence_groups(&rules, None),
+        rules,
     }
     .render()?)
-}
-
-fn visible_rules() -> Vec<Rule> {
-    catalog().into_iter().chain(extensions()).collect()
 }
 
 struct Coverage {
@@ -107,6 +136,26 @@ struct Coverage {
     total: usize,
     assessed: usize,
     executed: usize,
+}
+
+#[derive(Default)]
+struct OutcomeCounts {
+    findings: usize,
+    insufficient: usize,
+    passed: usize,
+    other: usize,
+}
+
+struct ResultGroup<'a> {
+    rule: Rule,
+    observations: Vec<&'a Observation>,
+    show_guidance: bool,
+}
+
+#[derive(Default)]
+pub struct ReportView {
+    pub full: bool,
+    pub findings_only: bool,
 }
 
 #[derive(Template)]
@@ -118,12 +167,19 @@ struct Report<'a> {
     csrf: &'a str,
     pending: bool,
     may_review: bool,
+    view: ReportView,
     reasons: &'static [&'static str],
     rules: Vec<Rule>,
     coverage: Vec<Coverage>,
     assessed_total: usize,
     canonical_total: usize,
-    observations: Vec<(&'a Observation, Rule)>,
+    outcome_counts: OutcomeCounts,
+    severity_counts: BTreeMap<&'static str, usize>,
+    finding_groups: Vec<ResultGroup<'a>>,
+    insufficient_groups: Vec<ResultGroup<'a>>,
+    missing_lockfile_rules: Vec<&'static str>,
+    passed_groups: Vec<ResultGroup<'a>>,
+    other_groups: Vec<ResultGroup<'a>>,
     changes: Vec<Change>,
     previous: Option<&'a Scan>,
     reviews: Vec<(&'a Review, Rule)>,
@@ -136,6 +192,18 @@ pub fn report(
     history: &[Scan],
     reviews: &[Review],
     csrf: &str,
+) -> anyhow::Result<String> {
+    report_with_view(p, role, scan, history, reviews, csrf, ReportView::default())
+}
+
+pub fn report_with_view(
+    p: &Project,
+    role: &str,
+    scan: &Scan,
+    history: &[Scan],
+    reviews: &[Review],
+    csrf: &str,
+    view: ReportView,
 ) -> anyhow::Result<String> {
     let pending = in_progress(scan);
     let mut changes = Vec::new();
@@ -221,12 +289,55 @@ pub fn report(
     let canonical = coverage.iter().filter(|row| row.method != "X");
     let assessed_total = canonical.clone().map(|row| row.assessed).sum();
     let canonical_total = canonical.map(|row| row.total).sum();
+    let mut outcome_counts = OutcomeCounts::default();
+    let mut severity_counts = BTreeMap::new();
+    let mut groups = [const { BTreeMap::new() }; 4];
+    let mut missing_lockfile_rules = Vec::new();
+    for (obs, rule) in observations {
+        let (count, rank) = match obs.outcome {
+            Outcome::Finding => (&mut outcome_counts.findings, 0),
+            Outcome::Insufficient => (&mut outcome_counts.insufficient, 1),
+            Outcome::Passed => (&mut outcome_counts.passed, 2),
+            Outcome::Na | Outcome::Review => (&mut outcome_counts.other, 3),
+        };
+        *count += 1;
+        *severity_counts.entry(rule.severity).or_default() += 1;
+        if is_missing_lockfile(obs) {
+            missing_lockfile_rules.push(rule.id);
+            continue;
+        }
+        groups[rank]
+            .entry(rule.id)
+            .or_insert_with(|| ResultGroup {
+                rule,
+                observations: Vec::new(),
+                show_guidance: false,
+            })
+            .observations
+            .push(obs);
+    }
+    let mut guidance_shown = BTreeSet::new();
+    let [
+        finding_groups,
+        insufficient_groups,
+        passed_groups,
+        other_groups,
+    ] = groups.map(|bucket| {
+        bucket
+            .into_values()
+            .map(|mut group| {
+                group.show_guidance = guidance_shown.insert(group.rule.id);
+                group
+            })
+            .collect()
+    });
     Ok(Report {
         p,
         scan,
         target: report_target(p, scan),
         csrf,
         pending,
+        view,
         may_review: matches!(scan.status.as_str(), "complete" | "partial")
             && matches!(role, "owner" | "reviewer"),
         reasons: &REASONS,
@@ -234,7 +345,13 @@ pub fn report(
         coverage,
         assessed_total,
         canonical_total,
-        observations,
+        outcome_counts,
+        severity_counts,
+        finding_groups,
+        insufficient_groups,
+        missing_lockfile_rules,
+        passed_groups,
+        other_groups,
         changes,
         previous: history.iter().rev().find(|prior| {
             prior.id != scan.id
@@ -247,44 +364,99 @@ pub fn report(
     .render()?)
 }
 
+struct EvidenceRow<'a> {
+    rule: Rule,
+    additional_input: Option<&'static str>,
+    readiness: Option<&'a str>,
+}
+
+#[derive(Default)]
+struct EvidenceGroups<'a> {
+    url: Vec<EvidenceRow<'a>>,
+    additional: Vec<EvidenceRow<'a>>,
+}
+
+fn evidence_groups<'a>(rules: &[Rule], scan: Option<&'a Scan>) -> EvidenceGroups<'a> {
+    let mut groups = EvidenceGroups::default();
+    for rule in rules.iter().filter(|rule| rule.implemented) {
+        let (additional_input, readiness) = match rule.id {
+            "A02-01" => (
+                Some("ระบุว่าเป็นไฟล์ดาวน์โหลด"),
+                scan.map(|scan| {
+                    if scan.policy.download {
+                        "รอ HTTP headers ของไฟล์ดาวน์โหลด"
+                    } else {
+                        "ไม่เกี่ยวข้องตามนโยบายดาวน์โหลด"
+                    }
+                }),
+            ),
+            "A02-02" => (
+                Some("กำหนดอายุขั้นต่ำของ HSTS"),
+                scan.map(|scan| {
+                    if scan.policy.hsts_min.is_some() {
+                        "รอ HTTP headers จากปลายทาง HTTPS"
+                    } else {
+                        "ไม่กำหนดอายุขั้นต่ำของ HSTS"
+                    }
+                }),
+            ),
+            VULNERABILITIES | MAINTENANCE => (
+                Some("Cargo.lock สำหรับโปรเจกต์ Rust"),
+                scan.map(|scan| dependency_readiness(scan, rule.id)),
+            ),
+            "A04-01" | "A04-02" => (
+                None,
+                scan.map(|scan| {
+                    if scan.policy.expected_form.is_some() {
+                        "รอ HTML ตอบกลับและฟอร์มที่ระบุ"
+                    } else {
+                        "รอ HTML ตอบกลับและตรวจว่ามีฟอร์มรหัสผ่านหรือไม่"
+                    }
+                }),
+            ),
+            "A04-03" => (None, scan.map(|_| "รอเอกสาร HTTPS และ URL สคริปต์ที่ประกาศ")),
+            "X03-01" => (None, scan.map(|_| "รอ HTML และรุ่นที่ประกาศใน URL สคริปต์")),
+            "A08-04" => (
+                Some("เปิดนโยบาย SRI"),
+                scan.map(|scan| {
+                    if scan.policy.sri {
+                        "รอรายการสคริปต์ภายนอกและแอตทริบิวต์ integrity"
+                    } else {
+                        "ไม่เกี่ยวข้องตามนโยบาย SRI"
+                    }
+                }),
+            ),
+            _ => unreachable!("preflight entry for every implemented rule"),
+        };
+        let bucket = if additional_input.is_some() {
+            &mut groups.additional
+        } else {
+            &mut groups.url
+        };
+        bucket.push(EvidenceRow {
+            rule: rule.clone(),
+            additional_input,
+            readiness,
+        });
+    }
+    groups
+}
+
 #[derive(Template)]
 #[template(path = "preview.html")]
 struct Preview<'a> {
     p: &'a Project,
     scan: &'a Scan,
     target: String,
-    rows: Vec<(Rule, &'a str)>,
+    evidence: EvidenceGroups<'a>,
 }
 
 pub fn preview(p: &Project, scan: &Scan) -> anyhow::Result<String> {
-    let rows = visible_rules()
-        .into_iter()
-        .filter(|rule| rule.implemented)
-        .map(|rule| {
-            let readiness = match rule.id {
-                "A02-01" if !scan.policy.download => "ไม่เกี่ยวข้องตามนโยบายดาวน์โหลด",
-                "A02-01" => "รอ HTTP headers ของไฟล์ดาวน์โหลด",
-                "A02-02" if scan.policy.hsts_min.is_none() => "ไม่กำหนดอายุขั้นต่ำของ HSTS",
-                "A02-02" => "รอ HTTP headers จากปลายทาง HTTPS",
-                "A03-01" | "A03-02" => dependency_readiness(scan, rule.id),
-                "A04-01" | "A04-02" if scan.policy.expected_form.is_some() => {
-                    "รอ HTML ตอบกลับและฟอร์มที่ระบุ"
-                }
-                "A04-01" | "A04-02" => "รอ HTML ตอบกลับและตรวจว่ามีฟอร์มรหัสผ่านหรือไม่",
-                "A04-03" => "รอเอกสาร HTTPS และ URL สคริปต์ที่ประกาศ",
-                "X03-01" => "รอ HTML และรุ่นที่ประกาศใน URL สคริปต์",
-                "A08-04" if !scan.policy.sri => "ไม่เกี่ยวข้องตามนโยบาย SRI",
-                "A08-04" => "รอรายการสคริปต์ภายนอกและแอตทริบิวต์ integrity",
-                _ => unreachable!("preflight entry for every implemented rule"),
-            };
-            (rule, readiness)
-        })
-        .collect();
     Ok(Preview {
         p,
         scan,
         target: report_target(p, scan),
-        rows,
+        evidence: evidence_groups(&visible_rules(), Some(scan)),
     }
     .render()?)
 }
@@ -324,6 +496,11 @@ fn report_target(p: &Project, scan: &Scan) -> String {
 
 fn in_progress(scan: &Scan) -> bool {
     matches!(scan.status.as_str(), "queued" | "running")
+}
+
+fn utc_date(seconds: &i64) -> String {
+    chrono::DateTime::from_timestamp(*seconds, 0)
+        .map_or_else(|| "—".into(), |date| date.to_string())
 }
 
 fn scan_status(status: &str) -> &'static str {
@@ -412,6 +589,90 @@ mod tests {
     }
 
     #[test]
+    fn compact_report_groups_items_and_expands_or_filters_on_request() {
+        use scraper::{Html, Selector};
+
+        let (p, mut scan) = example();
+        scan.results = [
+            ("fixed", Outcome::Passed),
+            ("missing", Outcome::Insufficient),
+            ("first", Outcome::Finding),
+            ("second", Outcome::Finding),
+            ("unrelated", Outcome::Na),
+        ]
+        .into_iter()
+        .map(|(item, outcome)| Observation {
+            rule: "A04-02".into(),
+            item: item.into(),
+            outcome,
+            observed: format!("Evidence for {item}"),
+        })
+        .collect();
+        let render = |view| {
+            Html::parse_document(
+                &report_with_view(&p, "viewer", &scan, &[], &[], "csrf", view).unwrap(),
+            )
+        };
+        let compact = render(ReportView::default());
+        let observations = Selector::parse("#results details[data-rule]").unwrap();
+        let badges = Selector::parse("[data-outcome]").unwrap();
+        let outcomes: Vec<_> = compact
+            .select(&badges)
+            .filter_map(|badge| badge.attr("data-outcome"))
+            .collect();
+        assert_eq!(
+            outcomes,
+            ["Finding", "Finding", "Insufficient", "Passed", "Na"]
+        );
+        assert_eq!(compact.select(&observations).count(), 5);
+        assert_eq!(
+            compact
+                .select(&Selector::parse(".group-observations tbody [data-rule]").unwrap())
+                .count(),
+            2
+        );
+        assert_eq!(
+            compact
+                .select(&Selector::parse("#results .report-reference").unwrap())
+                .count(),
+            1
+        );
+        assert_eq!(
+            compact
+                .select(&Selector::parse("#results details[data-rule][open]").unwrap())
+                .count(),
+            2
+        );
+        assert_eq!(
+            compact
+                .select(&Selector::parse(".result-bucket:not([open])").unwrap())
+                .count(),
+            1
+        );
+
+        let full = render(ReportView {
+            full: true,
+            findings_only: false,
+        });
+        assert!(
+            full.select(&Selector::parse("article details:not([open])").unwrap())
+                .next()
+                .is_none()
+        );
+        let findings = render(ReportView {
+            full: false,
+            findings_only: true,
+        });
+        assert_eq!(findings.select(&observations).count(), 2);
+        assert!(
+            findings
+                .select(&Selector::parse("#catalog a[href='/catalog']").unwrap())
+                .next()
+                .is_some()
+        );
+    }
+
+    #[test]
     fn preflight_lists_implemented_rules_and_missing_inputs() {
         let (p, mut scan) = example();
         scan.results = vec![Observation {
@@ -442,6 +703,67 @@ mod tests {
         assert!(body.contains("ส่วนขยาย</th><td>1 / 1</td><td>1</td>"));
         assert!(body.contains("data-rule=\"X03-01\""));
         assert!(body.contains("CVE-2020-11022"));
+    }
+
+    #[test]
+    fn url_only_scans_group_optional_evidence_and_summarize_missing_lockfile() {
+        use scraper::{Html, Selector};
+
+        let (mut p, mut scan) = example();
+        p.verified = true;
+        scan.results = crate::dependencies::evaluate(None);
+        let selector = |expression| Selector::parse(expression).unwrap();
+        let project = project(&p, "owner", &[], "csrf", "request", "").unwrap();
+        assert!(project.contains("aria-describedby=\"lock-hint\""));
+        for page in [project, preview(&p, &scan).unwrap()] {
+            let html = Html::parse_document(&page);
+            let rules = |group| {
+                html.select(&selector(group))
+                    .filter_map(|node| node.attr("data-rule"))
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(
+                rules("[data-evidence=url] [data-rule]"),
+                ["A04-01", "A04-02", "A04-03", "X03-01"]
+            );
+            assert_eq!(
+                rules("[data-evidence=additional] [data-rule]"),
+                ["A02-01", "A02-02", VULNERABILITIES, MAINTENANCE, "A08-04"]
+            );
+        }
+
+        let body = report(&p, "viewer", &scan, &[], &[], "csrf").unwrap();
+        assert_eq!(body.matches("ไม่ได้ตรวจ: ไม่มี Cargo.lock").count(), 1);
+        let html = Html::parse_document(&body);
+        let missing: Vec<_> = html
+            .select(&selector(
+                ".missing-input [data-rule][data-outcome=Insufficient]",
+            ))
+            .filter_map(|node| node.attr("data-rule"))
+            .collect();
+        assert_eq!(missing, [VULNERABILITIES, MAINTENANCE]);
+        assert_eq!(
+            html.select(&selector("#results details[data-rule]"))
+                .count(),
+            0
+        );
+        assert!(!body.contains("data-outcome=\"Passed\""));
+        assert!(
+            scan.results
+                .iter()
+                .all(|obs| obs.outcome == Outcome::Insufficient)
+        );
+
+        scan.results = crate::dependencies::evaluate(Some("invalid lockfile"));
+        let body = report(&p, "viewer", &scan, &[], &[], "csrf").unwrap();
+        assert!(!body.contains("ไม่ได้ตรวจ: ไม่มี Cargo.lock"));
+        let html = Html::parse_document(&body);
+        assert_eq!(
+            html.select(&selector("#results details[data-rule]"))
+                .count(),
+            2
+        );
+        assert!(body.contains("อ่านข้อมูลแพ็กเกจจาก Cargo.lock ไม่ได้"));
     }
 
     #[test]

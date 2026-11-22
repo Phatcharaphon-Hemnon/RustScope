@@ -64,7 +64,26 @@ def run(binary, state, output=None, rounds_dir=None):
         assert line.startswith("RustScope http://127.0.0.1:"), line
         origin = line.split()[1]
         localhost = Browser(origin.replace("127.0.0.1", "localhost"))
-        localhost.request("/login")
+        _, login_html = localhost.request("/login")
+        assert 'href="/register"' in login_html
+        visitor = Browser(origin)
+        _, registration_html = visitor.request("/register")
+        assert 'name="confirm_password"' in registration_html
+        password = " a local demo password "
+        registration = dict(user="registered", password=password, confirm_password=password)
+        visitor.request("/register", registration, 403, {"Origin": "https://example.invalid"})
+        visitor.request("/register", dict(registration, user="../owner"), 400)
+        visitor.request("/register", dict(registration, confirm_password="different"), 400)
+        visitor.request("/register", dict(registration, password="short", confirm_password="short"), 400)
+        path, home_html = visitor.request("/register", registration)
+        assert path == "/"
+        Page(home_html).value("csrf")
+        visitor.request("/register", dict(registration, user="owner"), 409)
+        visitor.request("/register", registration, 409)
+        fresh = Browser(origin)
+        fresh.request("/login", dict(user="registered", password=password.strip()), 403)
+        _, home_html = fresh.request("/login", dict(user="registered", password=password))
+        Page(home_html).value("csrf")
         credentials = {"user": "owner", "password": accounts["owner"]}
         localhost.request("/login", credentials, 403, {"Origin": origin})
         localhost.request("/login", credentials, 403, {"Origin": "null"})
