@@ -1,15 +1,5 @@
-<details class="result observation" data-rule="{{ rule.id }}"{% if full || obs.outcome == crate::domain::Outcome::Finding %} open{% endif %}>
-<summary class="observation-summary">
-<span class="observation-line">
-<strong>{{ rule.id }} {{ rule.name }}</strong>
-<span class="report-badge" data-outcome="{{ "{:?}"|format(obs.outcome) }}">{{ obs.outcome.thai() }}</span>
-<span class="report-badge" data-severity="{{ rule.severity }}" aria-label="ความรุนแรง {{ rule.severity }}">{{ rule.severity }}</span>
-<code class="observation-location" title="{{ obs.item }}">{{ obs.item }}</code>
-</span>
-</summary>
-<dl>
-<dt>สิ่งที่พบ</dt><dd>{{ obs.observed }}</dd>
-{% if show_guidance %}{% include "report-guidance.html" %}{% endif %}
-</dl>
-{% if show_guidance %}{% include "report-reference.html" %}{% endif %}
-</details>
+<tr id="item-{{ index }}">
+  <th scope="row"><code>{{ obs.item }}</code></th>
+  <td data-label="Outcome" data-outcome="{{ "{:?}"|format(obs.outcome) }}">{{ obs.outcome.label() }}</td>
+  <td data-label="Evidence">{{ obs.observed|legacy_evidence }}</td>
+</tr>

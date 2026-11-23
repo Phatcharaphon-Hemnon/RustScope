@@ -35,15 +35,22 @@ impl Store {
     }
 
     pub async fn projects(&self, user: &str) -> Result<Vec<Project>> {
-        let rows = sqlx::query_as::<_, (String, String)>(
-            "SELECT p.id, p.data FROM projects p JOIN members m ON m.project = p.id
+        let rows = sqlx::query_as::<_, (String, String, String)>(
+            "SELECT p.id, p.data, m.role FROM projects p JOIN members m ON m.project = p.id
              WHERE m.user = ? ORDER BY p.rowid",
         )
         .bind(user)
         .fetch_all(&self.0)
         .await?;
         rows.into_iter()
-            .map(|(id, data)| self.decode_project(&id, &data))
+            .map(|(id, data, role)| {
+                let mut card = self.decode_project(&id, &data)?;
+                card.challenge.clear();
+                if role != "owner" {
+                    card.base = crate::scope::safe_url(&card.base);
+                }
+                Ok(card)
+            })
             .collect()
     }
 

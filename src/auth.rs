@@ -123,7 +123,7 @@ fn verified_password(saved: &str, password: &str) -> bool {
 pub struct Session {
     pub user: String,
     pub csrf: String,
-    expires: i64,
+    pub(crate) expires: i64,
 }
 
 #[derive(Default)]
@@ -156,13 +156,21 @@ impl Sessions {
         Some(key)
     }
 
-    pub fn get(&self, headers: &HeaderMap) -> Option<Session> {
-        let cookie = headers
+    fn cookie(headers: &HeaderMap) -> Option<&str> {
+        headers
             .get("cookie")?
             .to_str()
             .ok()?
             .split(';')
-            .find_map(|v| v.trim().strip_prefix("rustscope="))?;
+            .find_map(|v| v.trim().strip_prefix("rustscope="))
+    }
+
+    pub fn end(&self, headers: &HeaderMap) -> Option<Session> {
+        self.0.lock().ok()?.remove(&digest(Self::cookie(headers)?))
+    }
+
+    pub fn get(&self, headers: &HeaderMap) -> Option<Session> {
+        let cookie = Self::cookie(headers)?;
         self.0
             .lock()
             .ok()?

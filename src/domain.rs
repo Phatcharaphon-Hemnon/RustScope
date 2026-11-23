@@ -20,13 +20,13 @@ pub enum Outcome {
 }
 
 impl Outcome {
-    pub fn thai(self) -> &'static str {
+    pub fn label(self) -> &'static str {
         match self {
-            Self::Finding => "พบตามกฎ",
-            Self::Review => "ต้องทบทวน",
-            Self::Passed => "ผ่านเฉพาะกฎ",
-            Self::Na => "ไม่เกี่ยวข้อง",
-            Self::Insufficient => "ข้อมูลไม่พอ",
+            Self::Finding => "Finding",
+            Self::Review => "Needs review",
+            Self::Passed => "Passed this check",
+            Self::Na => "Not applicable",
+            Self::Insufficient => "Insufficient evidence",
         }
     }
 }
@@ -67,73 +67,73 @@ fn parse_catalog(rows: &'static str) -> Vec<Rule> {
             let (inputs, applicability, closure, impact, severity) = match id {
                 "A02-01" => (
                     "HTTP headers",
-                    "ไฟล์ที่ระบุให้ดาวน์โหลด",
-                    "พบ nosniff ในคำตอบสำเร็จของไฟล์เดิม",
-                    "เบราว์เซอร์อาจตีความชนิดไฟล์ผิด",
-                    "ปานกลาง",
+                    "Designated download",
+                    "A successful response for the same download includes nosniff",
+                    "The browser may misinterpret the file type",
+                    "Medium",
                 ),
                 "A02-02" => (
                     "HTTPS headers, HSTS policy",
-                    "โฮสต์ HTTPS ที่กำหนดอายุขั้นต่ำ",
-                    "พบ HSTS ที่ถูกต้องและมีอายุถึงขั้นต่ำเดิม",
-                    "เบราว์เซอร์อาจเชื่อมต่อผ่าน HTTP",
-                    "ปานกลาง",
+                    "HTTPS host with a configured minimum max-age",
+                    "Valid HSTS meets the original minimum max-age",
+                    "The browser may connect over HTTP",
+                    "Medium",
                 ),
                 "A03-01" => (
                     "Cargo.lock, RustSec",
-                    "แพ็กเกจจากแหล่งที่รองรับ",
-                    "พบแพ็กเกจเดิมในรุ่นที่พ้นช่วงได้รับผลกระทบตามประกาศ",
-                    "รุ่นที่ติดตั้งอยู่ในช่วงที่ประกาศระบุ",
-                    "ตามประกาศ",
+                    "Packages from supported sources",
+                    "The same package is present at a version outside the advisory's affected range",
+                    "The installed version falls within the advisory's affected range",
+                    "Per advisory",
                 ),
                 "A03-02" => (
                     "Cargo.lock, RustSec",
-                    "แพ็กเกจจากแหล่งที่รองรับ",
-                    "ยืนยันว่าแพ็กเกจเดิมพ้นช่วงที่ประกาศเลิกดูแลครอบคลุม",
-                    "อาจไม่ได้รับการบำรุงรักษา",
-                    "ต่ำ",
+                    "Packages from supported sources",
+                    "The same package is outside the range covered by the unmaintained advisory",
+                    "The package may no longer be maintained",
+                    "Low",
                 ),
                 "A04-01" => (
                     "HTML, final URL",
-                    "เอกสารที่มีฟอร์มรหัสผ่าน",
-                    "พบฟอร์มเดิมในเอกสารที่ส่งผ่าน HTTPS",
-                    "บุคคลบนทางผ่านอาจเปลี่ยนฟอร์มได้",
-                    "สูง",
+                    "Document containing a password form",
+                    "The same form is present in a document served over HTTPS",
+                    "Someone on the network path could alter the form",
+                    "High",
                 ),
                 "A04-02" => (
                     "HTML, final URL",
-                    "ฟอร์มรหัสผ่านและปุ่มส่งของฟอร์ม",
-                    "พบฟอร์มเดิมและทุกปลายทางที่ตรวจได้ใช้ HTTPS",
-                    "รหัสผ่านอาจถูกส่งผ่าน HTTP",
-                    "สูง",
+                    "Password form and its submit controls",
+                    "The same form is present and every assessable destination uses HTTPS",
+                    "Passwords may be sent over HTTP",
+                    "High",
                 ),
                 "A04-03" => (
                     "HTML, final URL",
-                    "เอกสาร HTTPS ที่ประกาศแหล่งสคริปต์",
-                    "พบสคริปต์เดิมที่ประกาศปลายทาง HTTPS",
-                    "สคริปต์อาจถูกบล็อกหรือเปลี่ยนระหว่างทาง",
-                    "ปานกลาง",
+                    "HTTPS document declaring script sources",
+                    "The same script is declared with an HTTPS destination",
+                    "Scripts may be blocked or altered in transit",
+                    "Medium",
                 ),
                 "A08-04" => (
                     "HTML, SRI policy",
-                    "สคริปต์ภายนอกที่นโยบายกำหนดให้ใช้ SRI",
-                    "พบ integrity ที่มีรูปแบบถูกต้องสำหรับรายการเดิมตามนโยบายเดิม",
-                    "ขาดข้อมูลที่เบราว์เซอร์ใช้ตรวจความสมบูรณ์",
-                    "ปานกลาง",
+                    "External scripts subject to the SRI policy",
+                    "The same item has a well-formed integrity attribute under the same policy",
+                    "The browser lacks the information it needs to check integrity",
+                    "Medium",
                 ),
                 "X03-01" => (
                     "HTML, final URL, Retire.js",
-                    "HTML ที่ประกาศชื่อไฟล์หรือ URL สคริปต์พร้อมรุ่นที่ตรวจได้",
-                    "พบรายการเดิมพร้อมรุ่นที่เปรียบเทียบได้และพ้นช่วงตามประกาศ",
-                    "รุ่นที่ประกาศอยู่ในช่วงที่ได้รับผลกระทบ",
-                    "ตามประกาศ",
+                    "HTML that declares a script filename or URL with an identifiable version",
+                    "The same item has a comparable version outside the advisory's affected range",
+                    "The declared version is within the affected range",
+                    "Per advisory",
                 ),
                 _ => (
                     evidence,
                     evidence,
-                    "ทบทวนหลักฐานรุ่นใหม่ของรายการเดิมตามเกณฑ์ตัดสิน",
+                    "Review new release evidence for the same item against the decision criteria",
                     name,
-                    "ประเมินตามบริบท",
+                    "Context-dependent",
                 ),
             };
             let implemented = matches!(
@@ -162,11 +162,11 @@ fn parse_catalog(rows: &'static str) -> Vec<Rule> {
                 impact,
                 severity,
                 confidence: if id == "X03-01" {
-                    "ตรวจจากชื่อไฟล์และ URL ที่ประกาศเท่านั้น"
+                    "Checks declared filenames and URLs only"
                 } else if implemented {
-                    "ตามหลักฐานที่สังเกตได้โดยตรง"
+                    "Based on directly observed evidence"
                 } else {
-                    "ต้องตรวจหลักฐานโดยผู้ทบทวน"
+                    "Requires manual review of evidence"
                 },
                 implemented,
             })
@@ -191,12 +191,12 @@ pub enum ChangeStatus {
 }
 
 impl ChangeStatus {
-    pub fn thai(self) -> &'static str {
+    pub fn label(self) -> &'static str {
         match self {
-            Self::New => "พบใหม่",
-            Self::Persistent => "ยังพบอยู่",
-            Self::VerifiedFixed => "ยืนยันการแก้ไขแล้ว",
-            Self::NotComparable => "ยังเปรียบเทียบไม่ได้",
+            Self::New => "New",
+            Self::Persistent => "Persistent",
+            Self::VerifiedFixed => "Verified fixed",
+            Self::NotComparable => "Not comparable",
         }
     }
 }

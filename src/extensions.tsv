@@ -1,1 +1,1 @@
-ส่วนขยาย	X03-01	X	ประกาศไลบรารี JavaScript รุ่นที่มีช่องโหว่ใน HTML	เทียบรุ่นจากชื่อไฟล์และ URL ของ script src กับช่วงใน Retire.js	อัปเดตการอ้างอิงเป็นรุ่นที่พ้นช่วงที่ได้รับผลกระทบตามประกาศ
+Extensions	X03-01	X	Declared vulnerable JavaScript libraries	Compare versions in declared script filenames and URLs with Retire.js affected ranges.	Update the reference to a version outside the affected advisory range.

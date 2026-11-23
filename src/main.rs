@@ -1,6 +1,7 @@
 mod auth;
 mod dependencies;
 mod domain;
+mod legacy_evidence;
 mod model;
 mod scope;
 mod storage;
@@ -40,15 +41,18 @@ impl IntoResponse for Error {
 }
 impl From<anyhow::Error> for Error {
     fn from(_: anyhow::Error) -> Self {
-        Error(StatusCode::INTERNAL_SERVER_ERROR, "ดำเนินการไม่สำเร็จ")
+        Error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "The request could not be completed",
+        )
     }
 }
 type Answer<T> = Result<T, Error>;
 fn invalid() -> Error {
-    Error(StatusCode::BAD_REQUEST, "ข้อมูลไม่ถูกต้อง กรุณาตรวจแบบฟอร์มอีกครั้ง")
+    Error(StatusCode::BAD_REQUEST, "Check the form and try again")
 }
 fn denied() -> Error {
-    Error(StatusCode::FORBIDDEN, "ไม่มีสิทธิ์เข้าถึง")
+    Error(StatusCode::FORBIDDEN, "Access denied")
 }
 fn field<'a>(f: &'a Fields, k: &str) -> &'a str {
     f.get(k).map(String::as_str).unwrap_or_default().trim()
@@ -56,7 +60,7 @@ fn field<'a>(f: &'a Fields, k: &str) -> &'a str {
 fn session(app: &App, h: &HeaderMap) -> Answer<Session> {
     app.sessions
         .get(h)
-        .ok_or(Error(StatusCode::UNAUTHORIZED, "กรุณาเข้าสู่ระบบที่ /login"))
+        .ok_or(Error(StatusCode::UNAUTHORIZED, "Sign in at /login"))
 }
 fn mutation(app: &App, h: &HeaderMap, f: &Fields) -> Answer<Session> {
     let s = session(app, h)?;
@@ -84,12 +88,13 @@ async fn guard(State(app): State<Shared>, req: Request, next: Next) -> Response 
     let mut res = next.run(req).await;
     for (k, v) in [
         ("cache-control", "no-store"),
+        ("content-language", "en"),
         ("x-content-type-options", "nosniff"),
         // no-referrer also suppresses Origin on browser form submissions.
         ("referrer-policy", "same-origin"),
         (
             "content-security-policy",
-            "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
+            "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
         ),
     ] {
         res.headers_mut().insert(k, HeaderValue::from_static(v));
@@ -98,9 +103,10 @@ async fn guard(State(app): State<Shared>, req: Request, next: Next) -> Response 
 }
 
 async fn login_page() -> Answer<Html<String>> {
-    Ok(Html(ui::login()?))
+    Ok(Html(ui::login("", "")?))
 }
 async fn login(State(app): State<Shared>, Form(f): Form<Fields>) -> Answer<Response> {
+    let user = field(&f, "user").to_owned();
     let key = tokio::task::spawn_blocking(move || {
         app.sessions.login(
             &app.accounts,
@@ -109,9 +115,29 @@ async fn login(State(app): State<Shared>, Form(f): Form<Fields>) -> Answer<Respo
         )
     })
     .await
-    .context("login task failed")?
-    .ok_or_else(denied)?;
-    signed_in(&key)
+    .context("login task failed")?;
+    match key {
+        Some(key) => signed_in(&key),
+        None => Ok((
+            StatusCode::FORBIDDEN,
+            Html(ui::login(&user, "Invalid username or password.")?),
+        )
+            .into_response()),
+    }
+}
+async fn logout(
+    State(app): State<Shared>,
+    h: HeaderMap,
+    Form(f): Form<Fields>,
+) -> Answer<Response> {
+    mutation(&app, &h, &f)?;
+    app.sessions.end(&h).ok_or_else(denied)?;
+    let mut res = Redirect::to("/login").into_response();
+    res.headers_mut().insert(
+        "set-cookie",
+        HeaderValue::from_static("rustscope=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0"),
+    );
+    Ok(res)
 }
 fn signed_in(key: &str) -> Answer<Response> {
     let mut res = Redirect::to("/").into_response();
@@ -125,22 +151,28 @@ fn signed_in(key: &str) -> Answer<Response> {
     Ok(res)
 }
 async fn registration_page() -> Answer<Html<String>> {
-    Ok(Html(ui::registration("", "")?))
+    Ok(Html(ui::registration("", "", "")?))
 }
 async fn register(State(app): State<Shared>, Form(f): Form<Fields>) -> Answer<Response> {
     let user = field(&f, "user");
     let password = f.get("password").map_or("", String::as_str);
-    let error_response = |status, message| -> Answer<Response> {
-        Ok((status, Html(ui::registration(user, message)?)).into_response())
+    let error_response = |status, name, message| -> Answer<Response> {
+        Ok((status, Html(ui::registration(user, name, message)?)).into_response())
     };
     if !auth::valid_registration(user, password) {
-        return error_response(
-            StatusCode::BAD_REQUEST,
-            "กรุณาตรวจชื่อบัญชีและความยาวรหัสผ่านตามคำแนะนำ",
-        );
+        let (field, message) = if !label(user) || user.starts_with('.') {
+            ("user", "Enter a valid username")
+        } else {
+            ("password", "At least 12 characters, up to 256 bytes")
+        };
+        return error_response(StatusCode::BAD_REQUEST, field, message);
     }
     if f.get("password") != f.get("confirm_password") {
-        return error_response(StatusCode::BAD_REQUEST, "รหัสผ่านทั้งสองช่องไม่ตรงกัน");
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "confirm_password",
+            "Passwords do not match",
+        );
     }
     let dir = app.accounts.clone();
     let account = user.to_owned();
@@ -157,7 +189,7 @@ async fn register(State(app): State<Shared>, Form(f): Form<Fields>) -> Answer<Re
             signed_in(&key)
         }
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-            error_response(StatusCode::CONFLICT, "ชื่อบัญชีนี้ถูกใช้แล้ว")
+            error_response(StatusCode::CONFLICT, "user", "Username already taken")
         }
         Err(error) => Err(anyhow::Error::from(error).into()),
     }
@@ -170,16 +202,11 @@ async fn home(State(app): State<Shared>, h: HeaderMap) -> Answer<Response> {
         days: "7",
         ..Default::default()
     };
-    Ok(Html(ui::home(
-        &app.store.projects(&s.user).await?,
-        &s.csrf,
-        form,
-    )?)
-    .into_response())
+    Ok(Html(ui::home(&app.store.projects(&s.user).await?, &s, form)?).into_response())
 }
 async fn catalog_page(State(app): State<Shared>, h: HeaderMap) -> Answer<Html<String>> {
-    session(&app, &h)?;
-    Ok(Html(ui::catalog_page()?))
+    let s = session(&app, &h)?;
+    Ok(Html(ui::catalog_page(&s)?))
 }
 
 async fn create(
@@ -190,16 +217,17 @@ async fn create(
     let s = mutation(&app, &h, &f)?;
     let project = match project_input(&f) {
         Ok(project) => project,
-        Err(error) => {
+        Err((error_field, error)) => {
             let form = ui::ProjectForm {
                 name: field(&f, "name"),
                 base: field(&f, "base"),
                 days: field(&f, "days"),
                 live: field(&f, "mode") == "live",
                 upgrade: field(&f, "upgrade") == "on",
+                error_field,
                 error,
             };
-            let html = ui::home(&app.store.projects(&s.user).await?, &s.csrf, form)?;
+            let html = ui::home(&app.store.projects(&s.user).await?, &s, form)?;
             return Ok((StatusCode::BAD_REQUEST, Html(html)).into_response());
         }
     };
@@ -207,21 +235,24 @@ async fn create(
     Ok(Redirect::to(&format!("/p/{}", project.id)).into_response())
 }
 
-fn project_input(f: &Fields) -> Result<Project, &'static str> {
+fn project_input(f: &Fields) -> Result<Project, (&'static str, &'static str)> {
     let name = field(f, "name");
     let demo = match field(f, "mode") {
         "demo" => true,
         "live" => false,
-        _ => return Err("กรุณาเลือกโหมดสร้างโปรเจกต์"),
+        _ => return Err(("mode", "Choose a project mode")),
     };
     let days = field(f, "days")
         .parse::<i64>()
         .ok()
         .filter(|days| (1..=30).contains(days))
-        .ok_or("อายุของขอบเขตต้องอยู่ระหว่าง 1 ถึง 30 วัน")?;
+        .ok_or(("days", "The scope duration must be between 1 and 30 days"))?;
     let valid_name = (1..=40).contains(&name.chars().count()) && name.chars().all(|c| c.is_alphanumeric() || matches!(c,' '|'_'|'-'|'.'|'\u{0e31}'|'\u{0e34}'..='\u{0e3a}'|'\u{0e47}'..='\u{0e4e}'));
     if !valid_name {
-        return Err("ชื่อโปรเจกต์ต้องมี 1 ถึง 40 ตัวอักษร ใช้ตัวอักษร ตัวเลข เว้นวรรค จุด ขีดกลาง หรือขีดล่าง");
+        return Err((
+            "name",
+            "Use 1 to 40 characters for the project name. Letters, numbers, spaces, periods, hyphens, and underscores are allowed.",
+        ));
     }
     let base = if demo {
         "https://fixture.invalid"
@@ -230,15 +261,18 @@ fn project_input(f: &Fields) -> Result<Project, &'static str> {
     };
     let expires = now() + days * 86400;
     if base.is_empty() {
-        return Err("กรุณากรอก URL ขอบเขต เช่น https://example.org/app");
+        return Err(("base", "Enter a scope URL such as https://example.org/app"));
     }
     let scope = Scope::new(base, expires).map_err(
-        |_| "ใช้ URL HTTP หรือ HTTPS พร้อมเส้นทางแบบง่าย โดยเว้นพารามิเตอร์ จุดอ้างอิง และข้อมูลล็อกอิน",
+        |_| ("base", "Use an HTTP or HTTPS URL with a simple path and omit query parameters, fragments, and credentials."),
     )?;
     let upgrade = !demo && !scope.is_https() && field(f, "upgrade") == "on";
-    scope
-        .with_upgrade(upgrade)
-        .map_err(|_| "ตัวเลือกอนุมัติ HTTPS เพิ่มใช้ได้กับ URL ที่เริ่มด้วย http:// และใช้พอร์ต 80")?;
+    scope.with_upgrade(upgrade).map_err(|_| {
+        (
+            "upgrade",
+            "Adding HTTPS is available for HTTP URLs on port 80",
+        )
+    })?;
     Ok(Project {
         id: token(),
         name: name.into(),
@@ -261,9 +295,9 @@ async fn project(
         &p,
         &role,
         &app.store.scans(&s.user, &id).await?,
-        &s.csrf,
+        &s,
         &token(),
-        "",
+        ui::Feedback::default(),
     )?))
 }
 async fn owner(app: &App, s: &Session, id: &str) -> Answer<Project> {
@@ -288,30 +322,42 @@ async fn verify(
         };
         if let Err(reason) = result {
             let message = match reason {
-                "verification file missing" => "ไม่พบไฟล์ยืนยัน (HTTP 404) ให้เผยแพร่ไฟล์ที่ URL ด้านล่าง",
+                "verification file missing" => {
+                    "Verification file not found (HTTP 404). Publish it at the URL below."
+                }
                 "verification redirected" => {
-                    "URL ไฟล์ยืนยันเปลี่ยนเส้นทาง ให้ URL ด้านล่างตอบ HTTP 200 โดยตรง"
+                    "The verification file redirects. Serve it directly with HTTP 200 at the URL below."
                 }
                 "verification forbidden" => {
-                    "เว็บไซต์ปฏิเสธการเข้าถึงไฟล์ยืนยัน ให้เปิด URL ด้านล่างได้โดยไม่ต้องเข้าสู่ระบบ"
+                    "The site denied access to the verification file. Make the URL below accessible without signing in."
                 }
                 "verification response too large" => {
-                    "เว็บไซต์ส่งข้อมูลมากเกินไป เช่น หน้า HTML ให้ URL ด้านล่างส่งเฉพาะรหัสยืนยันเป็นข้อความ"
+                    "The site returned too much data, such as an HTML page. Serve only the verification code as plain text."
                 }
                 "control verification failed" | "unsupported text encoding" => {
-                    "เนื้อหาไฟล์ยืนยันไม่ตรงกับรหัสด้านล่าง ให้บันทึกเฉพาะรหัสเป็นข้อความ UTF-8"
+                    "The verification file does not match the code below. Save only the code as UTF-8 text."
                 }
-                "public IPv4 destination required" => "เว็บไซต์ต้องเข้าถึงได้ผ่านที่อยู่ IPv4 สาธารณะ",
-                "scope expired" => "ขอบเขตหมดอายุแล้ว กรุณาสร้างโปรเจกต์ใหม่เพื่อขออนุมัติขอบเขต",
-                _ => "เปิด URL ไฟล์ยืนยันไม่ได้ กรุณาตรวจ URL และการตั้งค่าเว็บไซต์แล้วลองอีกครั้ง",
+                "public IPv4 destination required" => {
+                    "The website must be reachable through a public IPv4 address"
+                }
+                "scope expired" => {
+                    "The scope expired. Create a new project to request a new scope."
+                }
+                _ => {
+                    "The verification file could not be reached. Check the URL and site configuration and try again."
+                }
             };
             let html = ui::project(
                 &p,
                 "owner",
                 &app.store.scans(&s.user, &id).await?,
-                &s.csrf,
+                &s,
                 &token(),
-                message,
+                ui::Feedback {
+                    field: "verification",
+                    message,
+                    values: None,
+                },
             )?;
             return Ok((StatusCode::UNPROCESSABLE_ENTITY, Html(html)).into_response());
         }
@@ -319,25 +365,63 @@ async fn verify(
     }
     Ok(Redirect::to(&format!("/p/{id}")).into_response())
 }
+async fn project_error(
+    app: &App,
+    s: &Session,
+    p: &Project,
+    f: &Fields,
+    field_name: &str,
+    message: &str,
+) -> Answer<Response> {
+    let request = f
+        .get("request_id")
+        .filter(|id| label(id))
+        .cloned()
+        .unwrap_or_else(token);
+    let page = ui::project(
+        p,
+        "owner",
+        &app.store.scans(&s.user, &p.id).await?,
+        s,
+        &request,
+        ui::Feedback {
+            field: field_name,
+            message,
+            values: Some(f),
+        },
+    )?;
+    Ok((StatusCode::BAD_REQUEST, Html(page)).into_response())
+}
 async fn member(
     State(app): State<Shared>,
     Path(id): Path<String>,
     h: HeaderMap,
     Form(f): Form<Fields>,
-) -> Answer<Redirect> {
+) -> Answer<Response> {
     let s = mutation(&app, &h, &f)?;
-    owner(&app, &s, &id).await?;
+    let p = owner(&app, &s, &id).await?;
     let user = field(&f, "user");
     let role = field(&f, "role");
     if !label(user)
         || user.starts_with('.')
-        || !matches!(role, "viewer" | "reviewer")
+        || user == s.user
         || !app.accounts.join("accounts").join(user).is_file()
     {
-        return Err(invalid());
+        return project_error(
+            &app,
+            &s,
+            &p,
+            &f,
+            "user",
+            "Choose an existing account other than the owner",
+        )
+        .await;
+    }
+    if !matches!(role, "viewer" | "reviewer") {
+        return project_error(&app, &s, &p, &f, "role", "Choose Viewer or Reviewer").await;
     }
     app.store.member(&s.user, &id, user, role).await?;
-    Ok(Redirect::to(&format!("/p/{id}")))
+    Ok(Redirect::to(&format!("/p/{id}#members")).into_response())
 }
 async fn scan(
     State(app): State<Shared>,
@@ -351,12 +435,23 @@ async fn scan(
     let scope = Scope::new(&p.base, p.expires)
         .and_then(|s| s.with_upgrade(p.upgrade))
         .map_err(|_| denied())?;
-    if !p.verified || !scope.contains(target) {
+    if !p.verified {
         return Err(denied());
+    }
+    let form_error = |name, message| project_error(&app, &s, &p, &f, name, message);
+    if !scope.contains(target) {
+        return form_error("target", "Enter a target within the verified scope").await;
     }
     let release = field(&f, "release");
     let request = field(&f, "request_id");
-    if !label(release) || !label(request) {
+    if !label(release) {
+        return form_error(
+            "release",
+            "Use 1–80 bytes of letters, numbers, periods, hyphens or underscores",
+        )
+        .await;
+    }
+    if !label(request) {
         return Err(invalid());
     }
     let fixture = if p.demo { field(&f, "fixture") } else { "" };
@@ -364,11 +459,11 @@ async fn scan(
         && (target != "https://fixture.invalid/login"
             || !matches!(fixture, "issue" | "forbidden" | "persistent" | "fixed"))
     {
-        return Err(invalid());
+        return form_error("fixture", "Choose a demo fixture and its fixed target").await;
     }
     let expected = field(&f, "expected_form");
     if !expected.is_empty() && !label(expected) {
-        return Err(invalid());
+        return form_error("expected_form", "Enter a valid form ID").await;
     }
     let hsts = field(&f, "hsts_min");
     let policy = Policy {
@@ -378,14 +473,28 @@ async fn scan(
         hsts_min: if hsts.is_empty() {
             None
         } else {
-            Some(hsts.parse().map_err(|_| invalid())?)
+            match hsts.parse() {
+                Ok(age) => Some(age),
+                Err(_) => {
+                    return form_error("hsts_min", "Enter a nonnegative whole number of seconds")
+                        .await;
+                }
+            }
         },
     };
-    let lock = field(&f, "lock");
+    let lock = f.get("lock").map_or("", String::as_str);
+    // HTML form encoding serializes textarea line breaks as CRLF.
+    let normalized;
+    let lock = if lock.contains("\r\n") {
+        normalized = lock.replace("\r\n", "\n");
+        normalized.as_str()
+    } else {
+        lock
+    };
     if lock.len() > 256 * 1024 {
-        return Err(invalid());
+        return form_error("lock", "Cargo.lock exceeds 262,144 bytes").await;
     }
-    let input = if !lock.is_empty() {
+    let input = if !lock.trim().is_empty() {
         Some(lock)
     } else if p.demo {
         Some(include_str!("../fixtures/demo/dependencies.lock"))
@@ -395,7 +504,7 @@ async fn scan(
     let results = dependencies::evaluate(input);
     let environment = f.get("environment").map(String::as_str).unwrap_or("test");
     if !matches!(environment, "test" | "staging" | "production") {
-        return Err(invalid());
+        return form_error("environment", "Choose a listed environment").await;
     }
     let scan = Scan {
         id: token(),
@@ -411,7 +520,7 @@ async fn scan(
         results,
     };
     if field(&f, "preview") == "on" {
-        return Ok(Html(ui::preview(&p, &scan)?).into_response());
+        return Ok(Html(ui::preview(&p, &scan, &s)?).into_response());
     }
     let actual = app
         .store
@@ -448,19 +557,19 @@ async fn report(
     let scan = &history[index];
     let rounds = &history[..=index];
     let html = if view.full || view.findings_only {
-        ui::report_with_view(&p, &role, scan, rounds, &reviews, &s.csrf, view)?
+        ui::report_with_view(&p, &role, scan, rounds, &reviews, &s, view)?
     } else {
-        ui::report(&p, &role, scan, rounds, &reviews, &s.csrf)?
+        ui::report(&p, &role, scan, rounds, &reviews, &s)?
     };
     Ok(Html(html))
 }
 
 const REASONS: [&str; 5] = [
-    "หลักฐานของรุ่นนี้ขัดกับเกณฑ์",
-    "หลักฐานของรุ่นนี้ตรงตามเกณฑ์",
-    "หลักฐานขัดแย้งกัน",
-    "หลักฐานไม่ครอบคลุมขอบเขต",
-    "ข้อกำหนดอยู่นอกขอบเขตของรุ่นนี้",
+    "Release evidence contradicts the criteria",
+    "Release evidence meets the criteria",
+    "Evidence conflicts",
+    "Evidence does not cover the scope",
+    "Requirement is outside this release's scope",
 ];
 
 #[derive(Deserialize)]
@@ -482,7 +591,7 @@ fn reviewed_evidence(raw: &str, scan: &Scan) -> Answer<String> {
     }
     let fingerprint = hex::encode(Sha256::digest(raw.as_bytes()));
     if !raw.starts_with('{') {
-        return Ok(format!("เอกสาร SHA-256 {fingerprint}"));
+        return Ok(format!("Document SHA-256 {fingerprint}"));
     }
     let ci: Ci = serde_json::from_str(raw).map_err(|_| invalid())?;
     let valid_state = |s: &str| {
@@ -517,14 +626,14 @@ fn reviewed_evidence(raw: &str, scan: &Scan) -> Answer<String> {
         )
     };
     let binding = if ci.environment != scan.environment {
-        "สภาพแวดล้อมต่างจากรอบที่ตรวจ"
+        "Environment differs from the scanned environment"
     } else if scan.release.len() >= 7 && ci.commit.starts_with(&scan.release) {
-        "commit ตรงกับรุ่นที่ตรวจ"
+        "Commit matches the scanned release"
     } else {
-        "ผู้ทบทวนต้องตรวจความสัมพันธ์ระหว่าง commit กับรุ่น"
+        "The reviewer must confirm that the commit corresponds to the release"
     };
     Ok(format!(
-        "{binding} · CI {} · {} · {} · คาด {} · พบ {} · {} · SHA-256 {}",
+        "{binding} · CI {} · {} · {} · Expected {} · Observed {} · {} · SHA-256 {}",
         case, ci.commit, ci.environment, ci.expected, ci.actual, ci.timestamp, fingerprint
     ))
 }
@@ -671,6 +780,43 @@ async fn main() -> anyhow::Result<()> {
         .route("/", get(home))
         .route("/login", get(login_page).post(login))
         .route("/register", get(registration_page).post(register))
+        .route(
+            "/sample-report.pdf",
+            get(async || {
+                (
+                    [("content-type", "application/pdf")],
+                    include_bytes!("../examples/reports/fixed.pdf").as_slice(),
+                )
+            }),
+        )
+        .route("/logout", post(logout))
+        .route(
+            "/ui.js",
+            get(async || {
+                (
+                    [("content-type", "application/javascript")],
+                    include_str!("../templates/ui.js"),
+                )
+            }),
+        )
+        .route(
+            "/fonts/ibm-plex-sans.woff2",
+            get(async || {
+                (
+                    [("content-type", "font/woff2")],
+                    include_bytes!("../templates/fonts/ibm-plex-sans.woff2").as_slice(),
+                )
+            }),
+        )
+        .route(
+            "/fonts/jetbrains-mono.woff2",
+            get(async || {
+                (
+                    [("content-type", "font/woff2")],
+                    include_bytes!("../templates/fonts/jetbrains-mono.woff2").as_slice(),
+                )
+            }),
+        )
         .route("/catalog", get(catalog_page))
         .route("/projects", post(create))
         .route("/p/{id}", get(project))

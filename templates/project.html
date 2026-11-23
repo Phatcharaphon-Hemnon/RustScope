@@ -1,88 +1,94 @@
 {% extends "base.html" %}
+{% block account %}{% include "account.html" %}{% endblock %}
 {% block title %}{{ p.name }} · RustScope{% endblock %}
+{% macro error(key) %}{% if feedback.field == key %}<p class="form-error" id="{{ key }}-error" role="alert" tabindex="-1" autofocus>⚠ {{ feedback.message }}</p>{% endif %}{% endmacro %}
+{% macro copy_value(key,value,label,action) %}<div class="copy-field">
+<div>{{ label }} <button hidden type="button" data-copy="{{ key }}" aria-label="Copy verification {{ key }}">{{ action }}</button></div><code id="{{ key }}">{{ value }}</code></div>
+{% endmacro %}
 {% block content %}
-<nav class="no-print audit-nav"><a href="/">โปรเจกต์ของคุณ</a> · <a href="#catalog">ทะเบียนกฎ</a></nav>
-<h1 class="dashboard-heading">{{ p.name }}</h1>
-<section class="panel project-scope">
-  <h2>ขอบเขตการตรวจ</h2>
-  <dl>
-    <dt>บทบาทของคุณ</dt><dd>{{ role_label }}</dd>
-    <dt>URL ขอบเขต</dt><dd><code>{{ scope_url }}</code></dd>
-    {% if p.upgrade %}<dt>ขอบเขตเพิ่มเติม</dt><dd>HTTPS ของโฮสต์และเส้นทางเดียวกัน</dd>{% endif %}
-    <dt>วันหมดอายุ (Unix วินาที UTC)</dt><dd>{{ p.expires }}</dd>
-    <dt>สถานะ</dt><dd>{% if !active %}หมดอายุ{% elif p.demo %}สาธิตออฟไลน์{% elif p.verified %}ยืนยันแล้ว{% else %}รอยืนยันการควบคุม{% endif %}</dd>
-  </dl>
-  {% if !verification_error.is_empty() %}<p class="form-error" role="alert">{{ verification_error }}</p>{% endif %}
-  {% if !challenge_url.is_empty() %}
-  <p class="scope-instruction">เผยแพร่ไฟล์ <code>rustscope-verification.txt</code> ที่ <code>{{ challenge_url }}</code></p>
-  <p class="scope-instruction">ให้ไฟล์มีเฉพาะรหัส <code>{{ p.challenge }}</code> เปิด URL เพื่อตรวจว่าเห็นรหัสอย่างเดียว แล้วกดยืนยัน</p>
-  {% if p.upgrade %}<p>เผยแพร่ไฟล์ยืนยันที่ URL เดียวกันผ่าน HTTPS (พอร์ตเริ่มต้น) ด้วยรหัสเดียวกัน</p>{% endif %}
-  <form action="/p/{{ p.id }}/verify" method="post">
-    <input type="hidden" name="csrf" value="{{ csrf }}"><button>ยืนยันการควบคุม</button>
-  </form>
-  {% endif %}
-</section>
-<div class="layout">
-<section class="panel">
-  <h2>ประวัติการตรวจ</h2>
-  {% for scan in scans.iter().rev() %}
-  <p class="list-row"><a href="/p/{{ p.id }}/s/{{ scan.id }}">{{ scan.release }}</a> · {{ crate::ui::scan_status(scan.status.as_str()) }}</p>
-  {% else %}<p>ยังไม่มีรอบตรวจ</p>{% endfor %}
-</section>
-{% if owner %}
-<section class="panel">
-  <h2>เริ่มรอบตรวจ</h2>
-  {% if active && p.verified %}
-  <form action="/p/{{ p.id }}/scan" method="post" class="stack">
-    <input type="hidden" name="csrf" value="{{ csrf }}">
-    <input type="hidden" name="request_id" value="{{ request_id }}">
-    <label>สภาพแวดล้อม <select name="environment"><option value="test">ทดสอบ</option><option value="staging">เตรียมขึ้นระบบ</option><option value="production">ระบบจริง</option></select></label>
-    <label>รุ่นที่ตรวจ <input name="release" required placeholder="v1.0"></label>
-    {% if p.demo %}
-    <label>URL เป้าหมาย <input name="target" type="url" value="https://fixture.invalid/login" readonly required></label>
-    <label>หลักฐานสาธิต
-      <select name="fixture">
-        <option value="issue">พบฟอร์มส่งผ่าน HTTP</option>
-        <option value="forbidden">หน้าเป้าหมายตอบ 403</option>
-        <option value="persistent">ยังพบฟอร์มส่งผ่าน HTTP</option>
-        <option value="fixed">ฟอร์มเดิมส่งผ่าน HTTPS</option>
-      </select>
-    </label>
-    {% else %}
-    <label>URL เป้าหมาย <input name="target" type="url" maxlength="2048" value="{{ p.base }}" required></label>
-    <p class="hint">เริ่มตรวจด้วย URL ได้เลย ส่วน Cargo.lock และนโยบายใช้เพิ่มการตรวจเฉพาะกฎ</p>
-    {% endif %}
-    <details class="subpanel">
-      <summary>กฎที่ตรวจได้และหลักฐานเพิ่ม</summary>
-      {% include "scan-evidence.html" %}
-    </details>
-    <details class="subpanel"><summary>ตั้งค่าขั้นสูงและแนบ Cargo.lock</summary><fieldset>
-      <legend>นโยบายและหลักฐานประกอบ</legend>
-      <label class="check"><input name="download" type="checkbox"{% if p.demo %} checked{% endif %}> เป้าหมายเป็นไฟล์ดาวน์โหลด</label>
-      <label>อายุ HSTS ขั้นต่ำ (วินาที) <input name="hsts_min" type="number" min="0"{% if p.demo %} value="3600"{% endif %}></label>
-      <label>รหัสฟอร์มที่คาดว่าจะพบ (HTML id) <input name="expected_form"{% if p.demo %} value="login"{% endif %}></label>
-      <label class="check"><input name="sri" type="checkbox"{% if p.demo %} checked{% endif %}> ต้องใช้ SRI สำหรับสคริปต์ภายนอก</label>
-      <label>เนื้อหา Cargo.lock (ไม่บังคับ สูงสุด 256 KiB) <textarea name="lock" rows="4" spellcheck="false" aria-describedby="lock-hint"></textarea></label>
-      <p id="lock-hint" class="hint"><code>Cargo.lock</code> คือไฟล์ที่ Cargo บันทึกรุ่นของแพ็กเกจที่ใช้จริง ใช้เสริมการตรวจแพ็กเกจของโปรเจกต์ Rust เท่านั้น เว้นว่างได้เมื่อตรวจด้วย URL</p>
-      {% if p.demo %}<p class="hint">ถ้าเว้น Cargo.lock ว่าง ระบบใช้ไฟล์สาธิต</p>{% endif %}
-    </fieldset></details>
-    <div class="actions"><button>เริ่มตรวจ</button> <button name="preview" value="on">ตรวจความพร้อม</button></div>
-  </form>
-  {% else %}<p>ต้องมีขอบเขตที่ยืนยันแล้วและยังไม่หมดอายุก่อนเริ่มรอบตรวจ</p>{% endif %}
-</section>
+<nav aria-label="Breadcrumb"><a href="/">Projects</a> / {{ p.name }}</nav>
+<header class="project-head" id="overview">
+<div>
+<h1>{{ p.name }}</h1>
+<p>{{ role_label }} · {% if p.demo %}Offline demo{% else %}Live{% endif %} · {% if !active %}<span class="pending">◷ Expired</span>{% elif p.verified %}<span class="verified">✓ Verified</span>{% else %}<span class="pending">◷ Awaiting verification</span>{% endif %}</p>
+<details>
+<summary>{% if active %}Expires{% else %}Expired{% endif %} {{ crate::ui::utc_date(p.expires) }} · Timestamp details</summary><code>{{ p.expires }}</code> Unix seconds</details>
+<p>Scope <code>{{ scope_url }}</code></p></div>
+<div>{% if owner %}
+{% if !active %}<a class="primary" href="/#create">Create project</a>{% elif p.verified %}<a class="primary" href="#scan">Prepare scan</a>{% else %}<form action="/p/{{ p.id }}/verify" method="post"><input type="hidden" name="csrf" value="{{ session.csrf }}"><button class="primary">Check verification</button></form>
 {% endif %}
+{% elif let Some(latest) = scans.last() %}<a class="primary" href="/p/{{ p.id }}/s/{{ latest.id }}">Open latest report</a>{% else %}<a class="primary" href="#catalog">Browse rules</a>{% endif %}</div></header>
+<nav class="sections" aria-label="Project sections"><a href="#overview" aria-current="location">Overview</a>{% if owner %}<a href="#scan">Scan</a><a href="#members">Members</a>{% endif %}<a href="#history">History</a><a href="#catalog">Rules</a></nav>
+<div class="project-grid">
+{% if owner %}
+<section class="panel" id="scan">
+{% if !active %}<h2>Scope expired</h2>
+<p>This scope has expired. Create a project to request a new scope.</p>
+{% elif !p.verified %}<h2>Verify scope</h2>{% call error("verification") %}
+<ol class="steps">
+<li>
+<h3>Publish verification file</h3>
+<p>Serve only the challenge code as plain text.</p>
+{% call copy_value("url", challenge_url, "File URL", "Copy URL") %}
+{% call copy_value("code", p.challenge, "Challenge code", "Copy code") %}<output id="copy-status"></output></li>
+<li>
+<h3>Check verification</h3>{% if p.upgrade %}<p>Publish the same verification file at the equivalent HTTPS URL on the default port.</p>{% endif %}</li>
+<li>
+<h3>Verified</h3>
+<p>Awaiting verification</p></li></ol>
+{% else %}
+<h2>Scan</h2>
+<form action="/p/{{ p.id }}/scan" method="post" class="stack">
+<input type="hidden" name="csrf" value="{{ session.csrf }}"><input type="hidden" name="request_id" value="{{ request_id }}">
+<div class="form-grid">
+<fieldset>
+<legend>Target</legend>
+<label>Target URL <input type="url" name="target" {% if feedback.field == "target" %}aria-invalid="true" aria-errormessage="target-error"{% endif %} {% if p.demo %}value="https://fixture.invalid/login" readonly{% else %}value="{{ feedback.value("target", p.base) }}"{% endif %} required></label>{% call error("target") %}
+<label>Environment <select name="environment" {% if feedback.field == "environment" %}aria-invalid="true" aria-errormessage="environment-error"{% endif %}>{% for (key, label) in [("test","Test"),("staging","Staging"),("production","Production")] %}<option value="{{ key }}"{% if feedback.value("environment","test") == *key %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>{% call error("environment") %}
+</fieldset>
+<fieldset>
+<legend>Release evidence</legend>
+<label>Release <input name="release" {% if feedback.field == "release" %}aria-invalid="true" aria-errormessage="release-error"{% endif %} value="{{ feedback.value("release","") }}" placeholder="v1.0" required></label>{% call error("release") %}
+{% if p.demo %}<label>Demo evidence <select name="fixture" {% if feedback.field == "fixture" %}aria-invalid="true" aria-errormessage="fixture-error"{% endif %}>{% for (key,label) in [("issue","Form submits over HTTP"),("forbidden","Target responds with 403"),("persistent","Form still submits over HTTP"),("fixed","Fixed form submits over HTTPS")] %}<option value="{{ key }}"{% if feedback.value("fixture","issue") == *key %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>{% call error("fixture") %}{% endif %}
+<label>Cargo.lock <textarea name="lock" {% if feedback.field == "lock" %}aria-invalid="true" aria-errormessage="lock-error"{% endif %} rows="4" spellcheck="false" aria-describedby="lock-hint">{{ feedback.value("lock","") }}</textarea></label><output id="lock-count"></output>{% call error("lock") %}<p id="lock-hint" class="hint">{% if p.demo %}Leave blank to use the demo file.{% else %}Optional for URL-only scans.{% endif %}</p></fieldset>
+</div>
+<details id="scan-policy" {% if feedback.field == "expected_form" || feedback.field == "hsts_min" %}open{% endif %}>
+<summary>Policy</summary>
+<div class="form-grid">
+<label><input name="download" type="checkbox"{% if feedback.value("download", self.demo_default("on")) == "on" %} checked{% endif %}> Download target</label>
+<label>Minimum HSTS max-age (seconds) <input name="hsts_min" {% if feedback.field == "hsts_min" %}aria-invalid="true" aria-errormessage="hsts_min-error"{% endif %} type="number" min="0" value="{{ feedback.value("hsts_min", self.demo_default("3600")) }}"></label>{% call error("hsts_min") %}
+<label>Expected form ID <input name="expected_form" {% if feedback.field == "expected_form" %}aria-invalid="true" aria-errormessage="expected_form-error"{% endif %} value="{{ feedback.value("expected_form", self.demo_default("login")) }}"></label>{% call error("expected_form") %}
+<label><input name="sri" type="checkbox"{% if feedback.value("sri", self.demo_default("on")) == "on" %} checked{% endif %}> Require SRI for external scripts</label></div></details>
+<div class="actions"><button class="start-scan">Start scan</button><button name="preview" value="on">Check readiness</button></div>
+</form>
+<details>
+<summary>Evidence requirements</summary>{% include "scan-evidence.html" %}</details>
+{% endif %}</section>
+{% endif %}
+<section class="panel" id="history">
+<h2>Scan history</h2>
+{% if scans.is_empty() %}<p>No scans yet.{% if !owner %} The project owner can start a scan.{% endif %}</p>{% if owner && active && p.verified %}<a href="#scan">Prepare scan</a>{% endif %}
+{% else %}
+<table>
+<thead>
+<tr><th>Release</th><th>Started</th><th>Status</th><th>Report</th></tr>
+</thead>
+<tbody>{% for scan in scans.iter().rev() %}
+<tr><th scope="row" data-label="Release">{{ scan.release }}</th><td data-label="Started">
+<details>
+<summary>{{ crate::ui::utc_date(scan.at) }}</summary>Timestamp details · {{ scan.at }}</details>
+</td><td data-label="Status">{{ crate::ui::scan_status(scan.status) }}</td><td><a aria-label="Open report for {{ scan.release }}" href="/p/{{ p.id }}/s/{{ scan.id }}">Open report</a></td></tr>
+{% endfor %}</tbody>
+</table>
+{% endif %}</section>
 </div>
 {% if owner %}
-<details class="panel member-panel">
-  <summary>จัดการสมาชิก</summary>
-  <form action="/p/{{ p.id }}/member" method="post" class="stack">
-    <input type="hidden" name="csrf" value="{{ csrf }}">
-    <label>ชื่อบัญชีที่มีอยู่แล้ว <input name="user" required></label>
-    <label>บทบาท <select name="role"><option value="viewer">ผู้ดูรายงาน</option><option value="reviewer">ผู้ทบทวน</option></select></label>
-    <button>บันทึกสิทธิ์</button>
-  </form>
-</details>
+<section class="panel" id="members">
+<h2>Members</h2>
+<form method="post" action="/p/{{ p.id }}/member" class="inline-form"><input type="hidden" name="csrf" value="{{ session.csrf }}">
+<label>Existing username <input name="user" {% if feedback.field == "user" %}aria-invalid="true" aria-errormessage="user-error"{% endif %} value="{{ feedback.value("user","") }}" required></label>{% call error("user") %}<label>Role <select name="role" {% if feedback.field == "role" %}aria-invalid="true" aria-errormessage="role-error"{% endif %}><option value="viewer">Viewer</option><option value="reviewer"{% if feedback.value("role","") == "reviewer" %} selected{% endif %}>Reviewer</option></select></label>{% call error("role") %}<button>Save access</button></form>
+</section>
 {% endif %}
-{% let catalog_open = false %}
+{% let standalone = false %}
 {% include "catalog.html" %}
 {% endblock %}

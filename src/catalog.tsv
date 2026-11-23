@@ -1,60 +1,60 @@
-A01 Broken Access Control	A01-01	E	ตารางสิทธิ์	เทียบตารางบทบาทกับผล CI ของ route เดียวกัน พบเมื่อบทบาทที่ต้องถูกปฏิเสธได้รับอนุญาต	แก้กฎสิทธิ์ของ route
-A01 Broken Access Control	A01-02	E	เจ้าของข้อมูล	เทียบผลทดสอบข้อมูลของตนและของบุคคลอื่นกับตารางสิทธิ์	เพิ่มการตรวจเจ้าของที่ backend
-A01 Broken Access Control	A01-03	E	ขอบเขตองค์กร	เทียบผลทดสอบที่ติดป้าย tenant กับนโยบายการแยกองค์กร	จำกัด query และสิทธิ์ตาม tenant
-A01 Broken Access Control	A01-04	E	สิทธิ์เริ่มต้น	ทบทวนกฎ fallback ของ router พร้อม middleware ที่มีผลจริง หาก route ใหม่เปิดโดยปริยายขัดนโยบายให้บันทึกผล	กำหนดสิทธิ์เริ่มต้นให้ปฏิเสธ
-A01 Broken Access Control	A01-05	E	การถอนสิทธิ์	เทียบผลทดสอบหลังถอนบทบาทกับเวลาเพิกถอนตามนโยบาย	ทำให้สิทธิ์ที่ cache ไว้หมดผลตามนโยบาย
-A01 Broken Access Control	A01-06	E	การดาวน์โหลด	เทียบผล CI สำหรับไฟล์จำกัดสิทธิ์กับสิทธิ์ของบทบาทเดียวกัน	ตรวจสิทธิ์ก่อนส่งไฟล์
-A02 Security Misconfiguration	A02-01	A	ชนิดไฟล์	อ่าน header ของไฟล์ดาวน์โหลดที่กำหนด แจ้งเมื่อ X-Content-Type-Options ขาดหรือค่าผิด	ส่ง nosniff และ Content-Type ที่ตรงกับไฟล์
-A02 Security Misconfiguration	A02-02	A	การบังคับ HTTPS	บนโฮสต์ HTTPS ที่กำหนดนโยบาย ตรวจค่า HSTS ที่ขาด ผิดรูป หรืออายุสั้นกว่าที่กำหนด	ตั้งค่าอายุตามนโยบาย
-A02 Security Misconfiguration	A02-03	A	โหมด debug	อ่านไฟล์ตั้งค่าที่ระบุว่า deploy จริง พบเมื่อ debug เปิดขัดกับนโยบาย production	ปิด debug ในโปรไฟล์ที่ใช้งาน
-A02 Security Misconfiguration	A02-04	A	การแสดงรายการไฟล์	อ่าน configuration ของ location ที่กำหนดให้ปิด directory listing พบเมื่อเปิดไว้จริง	ปิดการแสดงรายการไฟล์ใน location
-A02 Security Misconfiguration	A02-05	A	การฝังหน้าเว็บ	เทียบ CSP frame-ancestors หรือ X-Frame-Options ที่มีผลกับนโยบายหน้า HTML ที่ต้องจำกัดการฝัง	ตั้งค่านโยบายผู้ฝังหน้าที่อนุญาต
-A02 Security Misconfiguration	A02-06	A	การแคชข้อมูล	สำหรับหน้าที่เจ้าของจัดเป็นข้อมูลอ่อนไหว ตรวจ Cache-Control เทียบข้อกำหนด no-store	ตั้ง header ตามชนิดข้อมูล
-A03 Software Supply Chain Failures	A03-01	A	รุ่นที่มีประกาศ	เทียบชื่อ แหล่งแพ็กเกจ และรุ่นใน Cargo.lock กับ RustSec เฉพาะประกาศช่องโหว่ที่ยังมีผล	ปรับรุ่นตามประกาศและตรวจซ้ำ
-A03 Software Supply Chain Failures	A03-02	A	แพ็กเกจเลิกดูแล	แยกประกาศ unmaintained เป็นความเสี่ยงด้านการดูแล	หาแพ็กเกจทดแทนหรือบันทึกผู้รับผิดชอบ
-A03 Software Supply Chain Failures	A03-03	A	แหล่ง dependency	เทียบ source ที่ resolve แล้วกับทะเบียนแหล่งที่ทีมอนุมัติ	ใช้แหล่งที่ตรวจสอบและอนุมัติ
-A03 Software Supply Chain Failures	A03-04	A	การใช้ lockfile	เทียบไฟล์ build ของแอปกับนโยบาย build ด้วย lockfile และหลักฐาน CI	บังคับใช้รุ่นที่ล็อกในการ build
-A03 Software Supply Chain Failures	A03-05	A	รุ่นเครื่องมือ CI	อ่าน workflow ของระบบ CI ที่รองรับ ตรวจขั้นตอนภายนอกที่ขัดนโยบายตรึงรุ่นแบบแก้ย้อนหลังไม่ได้	ตรึง revision ที่ทีมทบทวนแล้ว
-A03 Software Supply Chain Failures	A03-06	E	รายการส่วนประกอบ	เทียบ SBOM ของ build เดียวกันกับ dependency ที่รวมใน release ตาม target และ feature	สร้าง SBOM จาก release build เดียวกัน
-A04 Cryptographic Failures	A04-01	A	หน้ารหัสผ่าน	อ่าน URL สุดท้ายและ HTML พบฟอร์มรหัสผ่านบน HTTP	ให้บริการหน้าผ่าน HTTPS
-A04 Cryptographic Failures	A04-02	A	ปลายทางฟอร์ม	คำนวณ action ตาม document URL และ base href รวม formaction ที่ระบุ พบเมื่อปลายทางฟอร์มรหัสผ่านเป็น HTTP	แก้ทุกปลายทางให้เป็น HTTPS
-A04 Cryptographic Failures	A04-03	A	ทรัพยากร HTTP	อ่าน HTML ของหน้า HTTPS ตรวจ script URL ที่ประกาศเป็น HTTP ระบุว่าพบในเอกสาร	เปลี่ยนแหล่ง script เป็น HTTPS
-A04 Cryptographic Failures	A04-04	A	การตรวจใบรับรอง	ตรวจหลักฐาน TLS ของโฮสต์ในขอบเขต แยกใบรับรองหมดอายุหรือชื่อไม่ตรงออกจาก timeout	ต่ออายุหรือติดตั้งใบรับรองตรงชื่อ
-A04 Cryptographic Failures	A04-05	E	การเก็บรหัสผ่าน	ทบทวนโค้ดและ config ของเส้นทางจัดเก็บจริงเทียบ algorithm และค่าต้นทุนที่ทีมกำหนด	ใช้ password hashing ตามนโยบาย
-A04 Cryptographic Failures	A04-06	E	ข้อมูลสำรอง	ทบทวนรายงานงานสำรองที่ระบุชุดข้อมูลและการเข้ารหัสจริงเทียบชั้นความลับ	เปิดการเข้ารหัสให้ชุดสำรองที่กำหนด
-A05 Injection	A05-01	S	SQL	วิเคราะห์ Rust ในฟังก์ชันที่รองรับ พบเส้นทางจากข้อมูลคำขอสู่ข้อความ SQL ที่นำไปใช้	ใช้ query แบบผูกพารามิเตอร์
-A05 Injection	A05-02	S	คำสั่ง shell	ชี้เส้นทางจากค่าผู้ใช้สู่ข้อความที่ส่งให้ shell ตีความ	ใช้ API แบบแยกคำสั่งกับ argument
-A05 Injection	A05-03	S	HTML	ชี้จุดที่นำค่าผู้ใช้เข้า HTML แบบ raw ใน template ที่รองรับ	เข้ารหัสตามบริบทก่อนแสดงผล
-A05 Injection	A05-04	S	ตัวระบุ SQL	ทบทวนค่าที่ใช้เลือกชื่อคอลัมน์หรือทิศเรียงลำดับเมื่อมาจากคำขอ	แมปค่าที่รับได้กับตัวเลือกตายตัว
-A05 Injection	A05-05	S	เงื่อนไขฐานข้อมูลเอกสาร	ทบทวนเส้นทางจาก JSON ของผู้ใช้ไปยัง filter โดยไม่มีการกำหนด field/operator ที่รับได้	สร้าง filter จาก schema ที่กำหนด
-A05 Injection	A05-06	S	ภาษา template	ทบทวนจุดที่ใช้ข้อความจากคำขอเป็นต้นฉบับ template	ใช้ template คงที่และส่งข้อมูลผ่านตัวแปร
-A06 Insecure Design	A06-01	E	หน้าที่ขัดกัน	เทียบผังกระบวนการและผล CI กับกติกาแยกผู้ขอและผู้อนุมัติ	แยกผู้มีสิทธิ์อนุมัติ
-A06 Insecure Design	A06-02	E	ขั้นตอนบังคับ	เทียบ state diagram กับผลทดสอบการเปลี่ยนสถานะที่นโยบายห้าม	ตรวจสถานะก่อนเปลี่ยนขั้น
-A06 Insecure Design	A06-03	E	รายการซ้ำ	ตรวจผลทดสอบคำสั่งธุรกิจเดียวกันซ้ำว่ามีการลงรายการเกินหนึ่งครั้งหรือไม่	ใช้ตัวระบุรายการและป้องกันการลงซ้ำ
-A06 Insecure Design	A06-04	E	ขีดจำกัดธุรกิจ	เทียบผลทดสอบค่าขอบเขตกับเพดานที่เจ้าของกำหนด	บังคับเพดานที่ backend
-A06 Insecure Design	A06-05	E	การทำงานพร้อมกัน	ตรวจผล CI ของงานพร้อมกันกับ invariant เช่น จำนวนที่นั่งคงเหลือ	ใช้ธุรกรรมหรือการควบคุม concurrency
-A06 Insecure Design	A06-06	E	การยืนยันรายการสำคัญ	เทียบ flow และผลทดสอบว่าการยืนยันผูกกับรายละเอียดรายการฉบับที่อนุมัติ	ผูกการยืนยันกับค่าและรุ่นของรายการ
-A07 Authentication Failures	A07-01	E	อายุโทเคนรีเซ็ต	เทียบเวลาหมดอายุกับผลทดสอบหลังหมดอายุ	ตรวจอายุที่เซิร์ฟเวอร์
-A07 Authentication Failures	A07-02	E	ใช้โทเคนซ้ำ	อ่านผลทดสอบการใช้โทเคนเดิมภายหลังรีเซ็ตสำเร็จ	ทำให้โทเคนหมดผลหลังใช้
-A07 Authentication Failures	A07-03	E	ออกจากระบบ	เทียบผล CI หลัง logout กับนโยบายยกเลิก session	เพิกถอน session ตามรูปแบบที่ใช้
-A07 Authentication Failures	A07-04	E	หมุน session	อ่านผลทดสอบที่ระบุว่า session เปลี่ยนเมื่อยืนยันตัวตนสำเร็จ	สร้าง session ใหม่หลัง login
-A07 Authentication Failures	A07-05	E	MFA ของผู้ดูแล	ทบทวน policy ของผู้ให้บริการยืนยันตัวตนและผล CI ของบทบาทผู้ดูแล	บังคับปัจจัยที่สองในกลุ่มที่กำหนด
-A07 Authentication Failures	A07-06	E	จำกัดการเข้าสู่ระบบผิด	เทียบ config และผลทดสอบที่เจ้าของส่งมากับนโยบายหน่วงหรือจำกัดความถี่	ปรับกลไกจำกัดตามนโยบาย
-A08 Software or Data Integrity Failures	A08-01	E	ลายเซ็น release	อ่านหลักฐานการตรวจลายเซ็นก่อน deploy เทียบตัวตนผู้ลงนามที่อนุญาต	ตรวจลายเซ็นและผู้ลงนามก่อนใช้งาน
-A08 Software or Data Integrity Failures	A08-02	E	digest ของ artifact	เทียบ digest ที่อนุมัติกับ digest ที่ติดตั้งสำหรับ build เดียวกัน	deploy ด้วย digest ที่อนุมัติ
-A08 Software or Data Integrity Failures	A08-03	E	แหล่งที่มาของ build	ตรวจการผูก provenance กับ repository, revision และ artifact ที่กำหนด	บันทึกและตรวจ provenance
-A08 Software or Data Integrity Failures	A08-04	A	script ภายนอก	ตรวจ integrity attribute บน script ที่นโยบายกำหนดให้ใช้ SRI	ตรึง hash ของทรัพยากรที่อนุมัติ
-A08 Software or Data Integrity Failures	A08-05	E	ข้อมูลนำเข้าแบบลงนาม	อ่านผล CI ของไฟล์ที่ลายเซ็นไม่ผ่านและผลการนำเข้าจริง	หยุดนำเข้าเมื่อยืนยันความถูกต้องไม่ผ่าน
-A08 Software or Data Integrity Failures	A08-06	E	การอนุมัติเปลี่ยนรุ่น	เทียบ release record กับหลักฐานอนุมัติ artifact รุ่นเดียวกัน	ผูกการอนุมัติกับ digest และ revision
-A09 Security Logging and Alerting Failures	A09-01	E	เหตุการณ์เข้าสู่ระบบ	เทียบเหตุการณ์จำลองจาก CI กับ log ในช่วงเวลาเดียวกัน	บันทึกผลและเวลาโดยปกปิดข้อมูลลับ
-A09 Security Logging and Alerting Failures	A09-02	E	เหตุการณ์เปลี่ยนสิทธิ์	เทียบรายการทดสอบกับ audit log ว่าระบุผู้กระทำ เป้าหมาย และผลตามนโยบาย	เพิ่ม audit event
-A09 Security Logging and Alerting Failures	A09-03	A	ข้อมูลลับใน log	ตรวจตัวอย่าง log ที่ใช้ค่าทดสอบจำลอง พบเมื่อค่านั้นถูกบันทึกแบบอ่านได้	ปกปิดค่าตั้งแต่จุดบันทึก
-A09 Security Logging and Alerting Failures	A09-04	E	เส้นทางแจ้งเตือน	เทียบ event ID กับหลักฐานส่งถึงช่องทางที่กำหนดภายในเวลานโยบาย	ตั้งผู้รับและทดสอบการส่ง
-A09 Security Logging and Alerting Failures	A09-05	E	อายุการเก็บ	เทียบ retention ที่มีผลจริงกับนโยบายรายชนิดบันทึก	ปรับนโยบายเก็บและลบ
-A09 Security Logging and Alerting Failures	A09-06	E	สิทธิ์แก้บันทึก	ทบทวนสิทธิ์ของบัญชีแอปบนระบบจัดเก็บ audit log เทียบตารางสิทธิ์	จำกัดการลบและแก้ไข
-A10 Mishandling of Exceptional Conditions	A10-01	E	บริการสิทธิ์ขัดข้อง	อ่านผล CI เมื่อบริการอนุมัติไม่พร้อมและเทียบผลที่ระบบตัดสินกับนโยบาย	กำหนดพฤติกรรมปฏิเสธเมื่อจำเป็น
-A10 Mishandling of Exceptional Conditions	A10-02	E	ย้อนธุรกรรม	ตรวจผลทดสอบล้มเหลวกลางงานกับสถานะข้อมูลที่คาดหลัง rollback	ครอบการเปลี่ยนแปลงด้วยธุรกรรม
-A10 Mishandling of Exceptional Conditions	A10-03	E	เวลารอบริการ	ตรวจ config และผล CI ว่าการรอ dependency สิ้นสุดในเวลาที่กำหนด	กำหนด timeout และผลลัพธ์ที่ชัดเจน
-A10 Mishandling of Exceptional Conditions	A10-04	E	ขอบเขต retry	ตรวจ policy การลองซ้ำและผลทดสอบเมื่อบริการล้มเหลวต่อเนื่อง	จำกัดจำนวนครั้งและเวลารวม
-A10 Mishandling of Exceptional Conditions	A10-05	A	รายละเอียด error	อ่านตัวอย่าง error response ที่เจ้าของส่งและชี้ stack trace หรือรายละเอียดภายในที่ออกสู่ผู้ใช้	ส่งข้อความทั่วไปพร้อมรหัสอ้างอิง
-A10 Mishandling of Exceptional Conditions	A10-06	E	คืนทรัพยากร	เทียบผลทดสอบ error path กับจำนวนงานค้างหรือตัวจับทรัพยากรที่ควรถูกคืน	คืนทรัพยากรเมื่อจบงานทุกเส้นทาง
+A01 Broken Access Control	A01-01	E	Access matrix	Compare the role matrix with CI results for the same route. Record a finding if a role that should be denied is allowed.	Correct the route's access rules.
+A01 Broken Access Control	A01-02	E	Data ownership	Compare test results for a user's own data and another user's data with the access matrix.	Enforce ownership checks on the backend.
+A01 Broken Access Control	A01-03	E	Tenant isolation	Compare tenant-tagged test results with the tenant isolation policy.	Scope queries and permissions to the tenant.
+A01 Broken Access Control	A01-04	E	Default access	Review router fallback rules and effective middleware. Record a finding if new routes are open by default in violation of policy.	Deny access by default.
+A01 Broken Access Control	A01-05	E	Permission revocation	Compare test results after role removal with the policy's revocation deadline.	Expire cached permissions within the policy window.
+A01 Broken Access Control	A01-06	E	Downloads	Compare CI results for restricted files with permissions for the same role.	Check permissions before serving files.
+A02 Security Misconfiguration	A02-01	A	File type	Check response headers for a designated download. Flag a missing or incorrect X-Content-Type-Options value.	Send nosniff and the correct Content-Type.
+A02 Security Misconfiguration	A02-02	A	HTTPS enforcement	Check HTTPS hosts with an HSTS policy for a missing, malformed, or insufficient max-age.	Set max-age to meet the policy.
+A02 Security Misconfiguration	A02-03	A	Debug mode	Review the deployed configuration. Record a finding if debug mode is enabled against production policy.	Disable debug mode in the deployed profile.
+A02 Security Misconfiguration	A02-04	A	Directory listing	Check the relevant location configuration for directory listing that violates policy.	Disable directory listing at the location.
+A02 Security Misconfiguration	A02-05	A	Page framing	Compare effective CSP frame-ancestors or X-Frame-Options with the framing policy for the HTML page.	Configure which origins may frame the page.
+A02 Security Misconfiguration	A02-06	A	Data caching	For pages classified as sensitive, compare Cache-Control with the no-store requirement.	Set the header for the data classification.
+A03 Software Supply Chain Failures	A03-01	A	Dependency advisories	Compare names, sources and versions in Cargo.lock against active RustSec vulnerability advisories.	Update to an unaffected version and rescan.
+A03 Software Supply Chain Failures	A03-02	A	Unmaintained packages	Treat RustSec unmaintained advisories as a separate maintenance risk.	Find a replacement package or assign a maintainer.
+A03 Software Supply Chain Failures	A03-03	A	Dependency sources	Compare resolved sources with the team's approved registry.	Use reviewed and approved sources.
+A03 Software Supply Chain Failures	A03-04	A	Lockfile enforcement	Compare application build configuration with the lockfile policy and CI evidence.	Require locked versions in builds.
+A03 Software Supply Chain Failures	A03-05	A	CI tool versions	Review supported CI workflows for external steps that violate immutable pinning policy.	Pin the reviewed revision.
+A03 Software Supply Chain Failures	A03-06	E	Component inventory	Compare the SBOM from the same build with dependencies shipped for the release target and features.	Generate the SBOM from the same release build.
+A04 Cryptographic Failures	A04-01	A	Password form page	Check the final URL and HTML for a password form served over HTTP.	Serve the page over HTTPS.
+A04 Cryptographic Failures	A04-02	A	Password form destination	Resolve action and formaction against the document URL and base href. Flag HTTP destinations for password forms.	Use HTTPS for every destination.
+A04 Cryptographic Failures	A04-03	A	HTTP script resources	Inspect HTTPS HTML for declared HTTP script URLs. Attribute each finding to the document.	Use HTTPS script sources.
+A04 Cryptographic Failures	A04-04	A	Certificate validation	Review TLS evidence for the scoped host. Distinguish expiry and hostname mismatch from timeouts.	Renew the certificate or install one that matches the hostname.
+A04 Cryptographic Failures	A04-05	E	Password storage	Compare the code and configuration used for password storage with the approved algorithm and cost settings.	Use password hashing that meets policy.
+A04 Cryptographic Failures	A04-06	E	Backups	Compare backup job evidence for the data and its encryption with the data classification.	Enable encryption for the required backups.
+A05 Injection	A05-01	S	SQL	Analyze supported Rust functions for request data reaching SQL text.	Use parameterized queries.
+A05 Injection	A05-02	S	Shell commands	Identify user-controlled values that reach text interpreted by a shell.	Use APIs that pass arguments separately from the command.
+A05 Injection	A05-03	S	HTML	Identify user values rendered as raw HTML in supported templates.	Apply context-appropriate output escaping.
+A05 Injection	A05-04	S	SQL identifiers	Review request-controlled column names and sort directions.	Map accepted values to fixed choices.
+A05 Injection	A05-05	S	Document database filters	Check whether user JSON reaches filters without restricting allowed fields and operators.	Build filters from a defined schema.
+A05 Injection	A05-06	S	Template source	Review locations where request text is used as template source.	Use a fixed template and pass data as variables.
+A06 Insecure Design	A06-01	E	Separation of duties	Compare the workflow and CI results with rules requiring distinct requesters and approvers.	Separate approval permissions.
+A06 Insecure Design	A06-02	E	Required workflow steps	Compare state diagrams with tests for transitions forbidden by policy.	Validate state before allowing a transition.
+A06 Insecure Design	A06-03	E	Duplicate operations	Check repeated business operation tests for duplicate records.	Use an operation identifier and prevent duplicate writes.
+A06 Insecure Design	A06-04	E	Business limits	Compare boundary tests with limits set by the owner.	Enforce the limit on the backend.
+A06 Insecure Design	A06-05	E	Concurrent operations	Compare concurrent CI results with invariants such as remaining seat count.	Use transactions or concurrency controls.
+A06 Insecure Design	A06-06	E	Sensitive operation confirmation	Compare the workflow and tests to check that approval is bound to the confirmed operation details.	Bind approval to the operation's values and version.
+A07 Authentication Failures	A07-01	E	Reset token expiry	Compare token expiry with test results after the deadline.	Enforce expiry on the server.
+A07 Authentication Failures	A07-02	E	Reset token reuse	Check results for reuse of the same token after a successful reset.	Invalidate tokens after use.
+A07 Authentication Failures	A07-03	E	Sign-out	Compare post-sign-out CI results with the session revocation policy.	Revoke the session using the applicable mechanism.
+A07 Authentication Failures	A07-04	E	Session rotation	Check that tests show a fresh session after authentication.	Issue a new session after sign-in.
+A07 Authentication Failures	A07-05	E	Administrator MFA	Review identity provider policy and CI results for administrator roles.	Require a second factor for the specified groups.
+A07 Authentication Failures	A07-06	E	Failed sign-in limits	Compare supplied configuration and test results with delay or rate-limit policy.	Apply the policy's sign-in limits.
+A08 Software or Data Integrity Failures	A08-01	E	Release signatures	Compare evidence of pre-deployment signature verification with the authorized signers.	Verify signatures and signers before use.
+A08 Software or Data Integrity Failures	A08-02	E	Artifact digest	Compare the approved digest with the installed digest for the same build.	Deploy using the approved digest.
+A08 Software or Data Integrity Failures	A08-03	E	Build provenance	Verify that provenance is bound to the expected repository, revision and artifact.	Record and verify build provenance.
+A08 Software or Data Integrity Failures	A08-04	A	External scripts	Check integrity attributes for scripts covered by the SRI policy.	Pin the hash of the approved resource.
+A08 Software or Data Integrity Failures	A08-05	E	Signed imports	Review CI results for an invalid file signature and the actual import outcome.	Stop imports when verification fails.
+A08 Software or Data Integrity Failures	A08-06	E	Release approval	Compare the release record with approval evidence for the same artifact version.	Bind approval to the digest and revision.
+A09 Security Logging and Alerting Failures	A09-01	E	Sign-in events	Compare simulated CI events with logs from the same time window.	Log the result and timestamp with secrets redacted.
+A09 Security Logging and Alerting Failures	A09-02	E	Permission change events	Compare test events with audit logs for the actor, target and outcome required by policy.	Add the required audit events.
+A09 Security Logging and Alerting Failures	A09-03	A	Secrets in logs	Check sample logs for readable synthetic test secrets.	Redact values at the logging boundary.
+A09 Security Logging and Alerting Failures	A09-04	E	Alert routing	Match event IDs with evidence that alerts reached the required channel within the policy deadline.	Configure recipients and test delivery.
+A09 Security Logging and Alerting Failures	A09-05	E	Log retention	Compare effective retention with the policy for each log type.	Adjust retention and deletion settings.
+A09 Security Logging and Alerting Failures	A09-06	E	Audit log modification access	Compare the app account's audit storage permissions with the access matrix.	Restrict deletion and modification.
+A10 Mishandling of Exceptional Conditions	A10-01	E	Authorization service outage	Compare CI decisions during authorization service outages with policy.	Deny access on failure where policy requires it.
+A10 Mishandling of Exceptional Conditions	A10-02	E	Transaction rollback	Compare partial failure tests with the expected data state after rollback.	Wrap related changes in a transaction.
+A10 Mishandling of Exceptional Conditions	A10-03	E	Service timeouts	Check configuration and CI results for bounded waits on dependencies.	Set timeouts and explicit outcomes.
+A10 Mishandling of Exceptional Conditions	A10-04	E	Retry limits	Review retry policy and test results during persistent dependency failures.	Bound retry attempts and total duration.
+A10 Mishandling of Exceptional Conditions	A10-05	A	Error details	Review supplied error responses for stack traces or internal details exposed to users.	Return a generic message with a reference ID.
+A10 Mishandling of Exceptional Conditions	A10-06	E	Resource cleanup	Compare error-path tests with task and resource counts to confirm cleanup.	Release resources on every exit path.

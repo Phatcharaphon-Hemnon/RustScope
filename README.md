@@ -1,6 +1,6 @@
 # RustScope
 
-RustScope assesses owner-approved web resources and release evidence, produces Thai reports, and compares rescans. It uses Rust, Axum, Tokio, reqwest, scraper, Askama and SQLx/SQLite. All eight automated checks run inside the application. The offline demo requires no target website, advisory service or ZAP installation.
+RustScope assesses owner-approved web resources and release evidence, produces English reports, and compares rescans. It uses Rust, Axum, Tokio, reqwest, scraper, Askama and SQLx/SQLite. All eight automated checks run inside the application. The offline demo requires no target website, advisory service or ZAP installation.
 
 ## Start from a clean checkout
 
@@ -10,7 +10,7 @@ Use Linux, a current stable Rust toolchain with Cargo, a C toolchain, and Python
 cargo run --locked
 ```
 
-Open **http://localhost:3100**, choose **สมัครบัญชี**, and create an account with a username and password. RustScope signs you in automatically. On later visits, use **เข้าสู่ระบบ** with the same credentials. Each account starts with access to its own projects and can be invited to other projects by their owners.
+Open **http://localhost:3100**, choose **Create account**, and create an account with a username and password. RustScope signs you in automatically. On later visits, use **Sign in** with the same credentials. Each account starts with access to its own projects and can receive viewer or reviewer access from another project’s owner.
 
 Existing accounts can sign in with their current credentials. To provision an account from the terminal, run `cargo run --locked -- account USER`. The command prints its generated password once.
 
@@ -33,7 +33,7 @@ Askama includes the compiled CSS in each page. The normal Cargo build and the ru
 python3 tests/demo.py --rounds-dir /tmp/rustscope-rounds
 ```
 
-This starts a temporary instance on loopback, creates three accounts, exercises the HTML form endpoints, and saves four Thai HTML reports. The built-in fixtures supply HTTP evidence in memory and never contact the illustrative hosts. The app uses the production evaluator, queue, database and comparison logic. A separate Rust test also fetches all four responses over a real isolated loopback HTTP connection.
+This starts a temporary instance on loopback, creates three accounts, exercises the HTML form endpoints, and saves four English HTML reports. The built-in fixtures supply HTTP evidence in memory and never contact the illustrative hosts. The app uses the production evaluator, queue, database and comparison logic. A separate Rust test also fetches all four responses over a real isolated loopback HTTP connection.
 
 | Round | Evidence for the same A04-02 form | Comparison |
 |---|---|---|
@@ -42,7 +42,7 @@ This starts a temporary instance on loopback, creates three accounts, exercises 
 | persistent | The form still declares an HTTP destination | Persistent finding |
 | fixed | The same form and all its submit destinations resolve to HTTPS | Verified fixed |
 
-To repeat the exercise in the browser, create an offline project. On the project screen, keep the demo target, environment and policy defaults. Enter a release name, select the first fixture, preview readiness, return to the form and submit the scan. Refresh the report if it shows a queued or running job. Repeat for the three remaining fixtures in the order above. The comparison links back to the preceding report. Use the browser’s Print command to save an A4 PDF.
+To repeat the exercise in the browser, create an offline project. On the project screen, keep the demo target, environment and policy defaults. Enter a release name, select the first fixture, preview readiness, return to the form and submit the scan. Refresh the report if it shows a queued or running job. Repeat for the three remaining fixtures in the order above. The comparison links back to the preceding report. Select **Print / Save PDF** to open all results, then **Print** to save an A4 PDF.
 
 The two sample PDFs show why a 403 cannot close the issue and what evidence finally closed it. Other findings, including the unchanged package risks, have independent outcomes. [403 report](examples/reports/forbidden.pdf) · [Verified fix report](examples/reports/fixed.pdf)
 
@@ -63,7 +63,7 @@ Supported environments are `test`, `staging` and `production`. Supported compari
 
 ## Rule coverage
 
-The Thai catalog has six requirements in each of ten OWASP categories. All 60 ID, method, name, evidence and remediation rows were compared with the supplied Thai brief. The catalog contains 18 A, 6 S and 36 E requirements. Eight A rules are automated. Ten more A rules and all six S rules are planned. All 36 E rules have a human-review workflow. The Thai coverage table distinguishes executed automation, assessable outcomes and catalog totals. [Canonical catalog](src/catalog.tsv)
+The catalog has six requirements in each of ten OWASP categories. All 60 ID, method, name, evidence and remediation rows were compared with the supplied Thai brief. The catalog contains 18 A, 6 S and 36 E requirements. Eight A rules are automated. Ten more A rules and all six S rules are planned. All 36 E rules have a human-review workflow. The coverage table distinguishes executed automation, assessable outcomes and catalog totals. [Canonical catalog](src/catalog.tsv)
 
 | Rule | Implemented decision |
 |---|---|
@@ -76,7 +76,7 @@ The Thai catalog has six requirements in each of ten OWASP categories. All 60 ID
 | A04-03 | Identify HTTP script declarations in HTTPS HTML |
 | A08-04 | Check integrity metadata syntax on policy-covered cross-origin script declarations |
 
-X03-01 appears on the **ส่วนขยาย** coverage row. It compares JavaScript library
+X03-01 appears on the **Extensions** coverage row. It compares JavaScript library
 versions declared in script URL paths and filenames with the offline Retire.js
 snapshot. A comparable declaration outside all known affected ranges passes
 for that declaration. Missing declarations and versions that cannot be compared
@@ -96,7 +96,7 @@ cargo build --locked
 python3 tests/demo.py --rounds-dir /tmp/rustscope-rounds
 ```
 
-Formatting, compilation and strict Clippy passed. **21 Rust tests passed**. The HTTP acceptance test verified the four A04-02 transitions, project and report isolation, viewer/reviewer permissions, CSRF rejection, retry deduplication, omission of simulated secrets from SQLite and reports, and preservation of machine evidence after review. Rust tests also exercised restart recovery, key loss, out-of-scope redirects, ambiguous form identities and environment changes. The missing-URL and missing-lockfile case produced **zero false closures across five open findings**. Chromium printed the Thai reports to A4 PDF.
+Formatting, compilation and strict Clippy passed. **29 Rust tests passed**. The HTTP acceptance test verified the four A04-02 transitions, project and report isolation, viewer/reviewer permissions, CSRF rejection, retry deduplication, omission of simulated secrets from SQLite and reports, and preservation of machine evidence after review. Rust tests also exercised restart recovery, key loss, out-of-scope redirects, ambiguous form identities and environment changes. The missing-URL and missing-lockfile case produced **zero false closures across five open findings**. Chromium printed the English reports to A4 PDF.
 
 The evaluation fixtures cover six hand-labelled target scenarios across eight canonical rules and X03-01. The evaluation test prints each rule’s precision, recall, confusion counts and insufficient-evidence count for these fixtures. [Evaluation fixtures](fixtures/evaluation) · [Scoring code](src/evaluation.rs)
 
@@ -106,12 +106,12 @@ Root owned the manifest and lockfile, routes, authentication, worker integration
 
 | Returned agent ID | Selected model | Work delivered |
 |---|---|---|
-| /root/architecture | gpt-6.2-astra | Thai catalog, domain contracts and rescan comparison |
+| /root/architecture | gpt-6.2-astra | Catalog, domain contracts and rescan comparison |
 | /root/security_review | gpt-6.2-astra | Verified scope, bounded collector, redirect regressions and independent closure/privacy review |
 | /root/web_checks | gpt-6.2-sol | Six HTTP/HTML checks, redaction and semantic item identities |
 | /root/dependency_checks | gpt-6.2-sol | Two dependency rules, real offline snapshot, generator and version fixtures |
 | /root/storage_worker | gpt-6.2-sol | Scoped SQLite persistence, queue recovery, audit events, append-only reviews and encrypted operational URLs |
-| /root/ui_reports | gpt-6.2-sol | Thai project pages, preflight, reports, comparison, review forms and print layout |
+| /root/ui_reports | gpt-6.2-sol | Project pages, preflight, reports, comparison, review forms and print layout |
 
 ## Operating limits
 

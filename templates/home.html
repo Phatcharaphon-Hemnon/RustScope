@@ -1,33 +1,38 @@
 {% extends "base.html" %}
-{% block title %}โปรเจกต์ · RustScope{% endblock %}
+{% block account %}{% include "account.html" %}{% endblock %}
+{% block title %}Projects · RustScope{% endblock %}
 {% block content %}
-<h1 class="dashboard-heading">โปรเจกต์ของคุณ</h1>
+<h1 class="dashboard-heading">Projects</h1>
 <div class="layout home-layout">
-  <section class="panel">
-    <h2>รายการโปรเจกต์</h2>
-    {% for p in projects %}
-    <p class="list-row"><a href="/p/{{ p.id }}">{{ p.name }}</a> · {% if p.demo %}สาธิตออฟไลน์{% elif p.verified %}ยืนยันขอบเขตแล้ว{% else %}รอยืนยันขอบเขต{% endif %}</p>
-    {% else %}<p class="hint">ยังไม่มีโปรเจกต์ที่คุณเข้าถึงได้</p>{% endfor %}
-  </section>
-  <section class="panel">
-    <h2>สร้างโปรเจกต์</h2>
+  <section class="cards" aria-label="Project list">{% for p in projects %}
+<article class="panel">
+<h2><a href="/p/{{ p.id }}">{{ p.name }}</a></h2>
+<p>{% if p.demo %}Offline demo{% else %}Live{% endif %} · {% if p.expires <= crate::auth::now() %}Expired{% elif p.verified %}<span class="verified">✓ Verified</span>{% else %}<span class="pending">◷ Awaiting verification</span>{% endif %}</p>
+<details>
+<summary>{% if p.expires <= crate::auth::now() %}Expired{% else %}Expires{% endif %} {{ crate::ui::utc_date(p.expires) }}</summary>Timestamp details · {{ p.expires }}</details>
+{% if !p.demo %}<p>Scope <code>{{ p.base }}</code></p>{% endif %}</article>
+{% else %}<p>No projects yet</p>{% endfor %}</section>
+  <section class="panel" id="create">
+    <h2>Create project</h2>
     <form action="/projects" method="post" class="stack">
-      {% if !form.error.is_empty() %}<p class="form-error" role="alert">{{ form.error }}</p>{% endif %}
-      <input type="hidden" name="csrf" value="{{ csrf }}">
-      <label>ชื่อโปรเจกต์ <input name="name" value="{{ form.name }}" maxlength="40" aria-describedby="name-hint" required></label>
-      <p id="name-hint" class="hint">สูงสุด 40 ตัวอักษร</p>
-      <label>โหมด
-        <select name="mode">
-          <option value="demo">สาธิตออฟไลน์</option>
-          <option value="live"{% if form.live %} selected{% endif %}>ตรวจเว็บไซต์ที่ได้รับอนุญาต</option>
+
+      <input type="hidden" name="csrf" value="{{ session.csrf }}">
+      <label>Project name <input name="name" {% if form.error_field == "name" %}aria-invalid="true" aria-errormessage="name-error"{% endif %} value="{{ form.name }}" maxlength="40" aria-describedby="name-hint" required></label>{% if form.error_field == "name" %}<p id="name-error" role="alert" tabindex="-1" autofocus>⚠ {{ form.error }}</p>{% endif %}
+      <p id="name-hint" class="hint">Up to 40 characters</p>
+      <label>Mode
+        <select name="mode" {% if form.error_field == "mode" %}aria-invalid="true" aria-errormessage="mode-error"{% endif %}>
+          <option value="demo">Offline demo</option>
+          <option value="live"{% if form.live %} selected{% endif %}>Live</option>
         </select>
-      </label>
-      <label>URL ขอบเขตสำหรับโหมดเว็บไซต์ <input name="base" value="{{ form.base }}" type="url" maxlength="2048" placeholder="https://example.org/app" aria-describedby="scope-hint"></label>
-      <p id="scope-hint" class="hint">โหมดเว็บไซต์ต้องกรอก URL ของเส้นทางที่ได้รับอนุญาตให้ตรวจ</p>
-      <label class="check"><input name="upgrade" type="checkbox" value="on"{% if form.upgrade %} checked{% endif %}> เพิ่ม HTTPS ให้ขอบเขตที่เริ่มด้วย http:// พอร์ต 80</label>
-      <label>อายุของขอบเขต (วัน) <input name="days" type="number" value="{{ form.days }}" min="1" max="30" required></label>
-      <button>สร้างโปรเจกต์</button>
+      </label>{% if form.error_field == "mode" %}<p id="mode-error" role="alert" tabindex="-1" autofocus>⚠ {{ form.error }}</p>{% endif %}
+      <div id="live-fields">
+<label>Scope URL <input name="base" {% if form.error_field == "base" %}aria-invalid="true" aria-errormessage="base-error"{% endif %} value="{{ form.base }}" type="url" maxlength="2048" placeholder="https://example.org/app" aria-describedby="scope-hint"></label>{% if form.error_field == "base" %}<p id="base-error" role="alert" tabindex="-1" autofocus>⚠ {{ form.error }}</p>{% endif %}
+      <p id="scope-hint" class="hint">Enter the URL of the path you are authorized to scan</p>
+      <label class="check"><input name="upgrade" {% if form.error_field == "upgrade" %}aria-invalid="true" aria-errormessage="upgrade-error"{% endif %} type="checkbox" value="on"{% if form.upgrade %} checked{% endif %}> Also authorize HTTPS on the same host and path</label>{% if form.error_field == "upgrade" %}<p id="upgrade-error" role="alert" tabindex="-1" autofocus>⚠ {{ form.error }}</p>{% endif %}</div>
+      <label>Scope duration (days) <input name="days" {% if form.error_field == "days" %}aria-invalid="true" aria-errormessage="days-error"{% endif %} type="number" value="{{ form.days }}" min="1" max="30" required></label>{% if form.error_field == "days" %}<p id="days-error" role="alert" tabindex="-1" autofocus>⚠ {{ form.error }}</p>{% endif %}
+      <button class="primary">Create project</button>
     </form>
+    <p><a href="/sample-report.pdf">View sample report (PDF)</a> · Demo data</p>
   </section>
 </div>
 {% endblock %}
