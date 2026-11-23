@@ -1,8 +1,9 @@
+mod worker;
 use crate::auth::{self, Session, Sessions, label, now, token};
 use crate::model::{Policy, Project, Review, Scan};
-use crate::scope::{HttpEvidence, Scope};
+use crate::scope::Scope;
 use crate::storage::Store;
-use crate::{dependencies, domain, ui, web};
+use crate::{dependencies, domain, ui};
 use anyhow::Context;
 use axum::{
     Form, Router,
@@ -13,7 +14,8 @@ use axum::{
     routing::{get, post},
 };
 use serde::Deserialize;
-use std::{collections::HashMap, fs, net::Ipv4Addr, path::PathBuf, sync::Arc, time::Duration};
+use std::{collections::HashMap, fs, net::Ipv4Addr, path::PathBuf, sync::Arc};
+use worker::worker;
 
 pub(crate) type Fields = HashMap<String, String>;
 struct App {
@@ -674,67 +676,6 @@ async fn review(
         .await
         .map_err(|_| invalid())?;
     Ok(Redirect::to(&format!("/p/{id}/s/{sid}")))
-}
-
-fn fixture_response(name: &str) -> Result<HttpEvidence, &'static str> {
-    let (status, body) = match name {
-        "issue" | "persistent" => (200, include_str!("../fixtures/demo/issue.html")),
-        "forbidden" => (403, ""),
-        "fixed" => (200, include_str!("../fixtures/demo/fixed.html")),
-        _ => return Err("unknown fixture"),
-    };
-    Ok(HttpEvidence {
-        final_url: "https://fixture.invalid/login".into(),
-        status,
-        headers: [
-            ("content-type".into(), "text/html".into()),
-            ("strict-transport-security".into(), "max-age=86400".into()),
-            ("x-content-type-options".into(), "nosniff".into()),
-        ]
-        .into(),
-        body: body.into(),
-    })
-}
-
-async fn run_one(app: &App) -> anyhow::Result<bool> {
-    let Some((p, mut scan, fixture)) = app.store.claim().await? else {
-        return Ok(false);
-    };
-    let response = match Scope::new(&p.base, p.expires).and_then(|s| s.with_upgrade(p.upgrade)) {
-        Ok(scope) if p.verified && scope.contains(&scan.target) => {
-            if p.demo {
-                fixture_response(&fixture)
-            } else {
-                scope.fetch(&scan.target).await
-            }
-        }
-        _ => Err("scope unavailable"),
-    };
-    scan.observed_at = now();
-    scan.results.extend(web::evaluate(
-        response.as_ref().map_err(|e| *e),
-        &scan.policy,
-    ));
-    scan.status = if scan
-        .results
-        .iter()
-        .any(|v| v.outcome == domain::Outcome::Insufficient)
-    {
-        "partial"
-    } else {
-        "complete"
-    }
-    .into();
-    app.store.finish(&scan).await?;
-    Ok(true)
-}
-
-async fn worker(app: &App) -> anyhow::Result<()> {
-    loop {
-        if !run_one(app).await? {
-            tokio::select! { _=app.wake.notified()=>{}, _=tokio::time::sleep(Duration::from_secs(5))=>{} }
-        }
-    }
 }
 
 pub async fn run() -> anyhow::Result<()> {
