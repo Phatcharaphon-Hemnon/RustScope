@@ -1,21 +1,20 @@
-{% macro render(groups, full) %}
-{% for group in groups %}
-{% let rule = group.rule %}
-{% if group.observations.len() > 1 %}
-<section class="observation-group">
-<h3>{{ rule.id }} {{ rule.name }}</h3>
-{% if group.show_guidance %}
+{% for group in groups %}{% let rule = group.rule %}
+<details class="result" id="rule-{{ rule.id }}" data-rule="{{ rule.id }}"{% if view.full || group.finding %} open{% endif %}>
+<summary><strong>{{ rule.id }} {{ rule.name }}</strong><span class="severity">Severity: {{ rule.severity }}</span><span>{{ group.summary }}</span></summary>
+<table>
+<thead>
+<tr><th>Item</th><th>Outcome</th><th>Evidence</th></tr>
+</thead>
+<tbody>{% for (index,obs) in group.observations %}
+  {% include "report-result.html" %}
+
+{% endfor %}</tbody>
+</table>
 <dl>{% include "report-guidance.html" %}</dl>
-{% include "report-reference.html" %}
+{% let full = view.full %}{% include "report-reference.html" %}</details>
+{% else %}{% if missing_lockfile_rules.is_empty() %}<p>{% if view.findings_only %}This scan recorded no findings{% else %}This scan recorded no automated results{% endif %}</p>{% endif %}{% endfor %}
+{% if !missing_lockfile_rules.is_empty() %}
+<p class="missing-input">Cargo.lock was not supplied
+  <span class="hint">({% for (index, rule) in missing_lockfile_rules %}{% if !loop.first %}, {% endif %}<span id="item-{{ index }}" data-rule="{{ rule }}" data-outcome="Insufficient">{{ rule }}</span>{% endfor %})</span>
+</p>
 {% endif %}
-<ul class="group-observations">
-{% let show_guidance = false %}
-{% for obs in group.observations %}<li>{% include "report-result.html" %}</li>{% endfor %}
-</ul>
-</section>
-{% else %}
-{% let show_guidance = group.show_guidance %}
-{% for obs in group.observations %}{% include "report-result.html" %}{% endfor %}
-{% endif %}
-{% endfor %}
-{% endmacro %}

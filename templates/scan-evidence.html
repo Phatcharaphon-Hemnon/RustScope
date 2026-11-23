@@ -1,14 +1,14 @@
 {% macro rule_table(rows, title, source) %}
 <table class="preflight-table" data-evidence="{{ source }}">
   <caption>{{ title }}</caption>
-  <thead><tr><th scope="col">กฎ</th><th scope="col">หลักฐานและเงื่อนไข</th></tr></thead>
+  <thead><tr><th scope="col">Rule</th><th scope="col">Evidence and applicability</th></tr></thead>
   <tbody>
     {% for row in rows %}
     <tr data-rule="{{ row.rule.id }}">
       <th scope="row">{{ row.rule.id }} {{ row.rule.name }}</th>
       <td>
-        {% if let Some(readiness) = row.readiness %}{{ readiness }}<br>{% endif %}
-        {% if let Some(input) = row.additional_input %}<strong>{{ input }}</strong><br>{% endif %}
+        {% if let Some(readiness) = row.readiness %}Status: {{ readiness|legacy_evidence }}<br>{% endif %}
+        {% if let Some(input) = row.additional_input %}<strong>Input: {{ input }}</strong><br>{% endif %}
         <span class="hint">{{ row.rule.applicability }}</span>
       </td>
     </tr>
@@ -17,5 +17,6 @@
 </table>
 {% endmacro %}
 
-{% call rule_table(evidence.url, "ตรวจได้ด้วย URL อย่างเดียว", "url") %}
-{% call rule_table(evidence.additional, "ใช้ไฟล์หรือนโยบายเพิ่ม", "additional") %}
+{% call rule_table(evidence.url, "URL checks", "url") %}
+<p class="scope-instruction">You can scan with just a URL. Additional evidence is needed only for rules that require a file or policy setting.</p>
+{% call rule_table(evidence.additional, "Checks requiring additional inputs", "additional") %}

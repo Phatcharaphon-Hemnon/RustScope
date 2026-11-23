@@ -1,17 +1,19 @@
 {% extends "base.html" %}
-{% block title %}สมัครบัญชี · RustScope{% endblock %}
+{% block title %}Create account · RustScope{% endblock %}
 {% block content %}
-<section class="panel login">
-<h1>สมัครบัญชี</h1>
-{% if !error.is_empty() %}<p class="form-error" role="alert">{{ error }}</p>{% endif %}
+<div class="auth-layout">
+<section class="login-card">
+<h1>Create account</h1>
+
 <form action="/register" method="post" class="stack">
-  <label>ชื่อบัญชี <input name="user" value="{{ user }}" autocomplete="username" maxlength="80" aria-describedby="register-user-hint" required></label>
-  <p class="hint" id="register-user-hint">ใช้ตัวอักษร ตัวเลข ขีดกลาง ขีดล่าง หรือจุด โดยไม่ขึ้นต้นด้วยจุด</p>
-  <label>รหัสผ่าน <input name="password" type="password" autocomplete="new-password" minlength="12" maxlength="256" aria-describedby="register-password-hint" required></label>
-  <p class="hint" id="register-password-hint">อย่างน้อย 12 ตัวอักษร และไม่เกิน 256 ไบต์</p>
-  <label>ยืนยันรหัสผ่าน <input name="confirm_password" type="password" autocomplete="new-password" minlength="12" maxlength="256" required></label>
-  <button class="w-full">สร้างบัญชี</button>
+  <label>Username <input name="user" {% if error_field == "user" %}aria-invalid="true" aria-errormessage="error-user"{% endif %} value="{{ user }}" autocomplete="username" maxlength="80" aria-describedby="register-user-hint" required></label>{% if error_field == "user" %}<p id="error-user" role="alert" tabindex="-1" autofocus>⚠ {{ error }}</p>{% endif %}
+  <p class="hint" id="register-user-hint">Use letters, numbers, hyphens, underscores, or periods. Start with a character other than a period.</p>
+  <label>Password <input name="password" {% if error_field == "password" %}aria-invalid="true" aria-errormessage="error-password"{% endif %} type="password" autocomplete="new-password" minlength="12" maxlength="256" aria-describedby="register-password-hint" required></label>{% if error_field == "password" %}<p id="error-password" role="alert" tabindex="-1" autofocus>⚠ {{ error }}</p>{% endif %}
+  <p class="hint" id="register-password-hint">At least 12 characters, up to 256 bytes</p>
+  <label>Confirm password <input name="confirm_password" {% if error_field == "confirm_password" %}aria-invalid="true" aria-errormessage="error-confirm_password"{% endif %} type="password" autocomplete="new-password" minlength="12" maxlength="256" required></label>{% if error_field == "confirm_password" %}<p id="error-confirm_password" role="alert" tabindex="-1" autofocus>⚠ {{ error }}</p>{% endif %}
+  <button class="w-full">Create account</button>
 </form>
-<p class="auth-switch">มีบัญชีแล้ว? <a href="/login">เข้าสู่ระบบ</a></p>
+<p>Already have an account? <a href="/login">Sign in</a></p>
 </section>
+<p class="statement">Assess a release.<br>Review the evidence.</p></div>
 {% endblock %}

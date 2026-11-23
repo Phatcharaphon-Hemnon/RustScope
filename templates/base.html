@@ -1,15 +1,16 @@
 <!doctype html>
-<html lang="th">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}RustScope{% endblock %}</title>
 {% block refresh %}{% endblock %}
 <style>{% include "style.css" %}</style>
+<script src="/ui.js" defer></script>
 </head>
 <body class="app-shell">
-<a class="skip-link no-print" href="#main">ข้ามไปยังเนื้อหา</a>
-<header class="banner"><div class="wrap"><a class="brand-link" href="/">RustScope</a></div></header>
-<main id="main" class="wrap app-main" tabindex="-1">{% block content %}{% endblock %}</main>
+<a class="skip" href="#content">Skip to content</a>
+<header class="banner"><div class="wrap"><a class="brand-link" href="/">RustScope</a>{% block account %}{% endblock %}</div></header>
+<main id="content" tabindex="-1" class="wrap app-main">{% block content %}{% endblock %}</main>
 </body>
 </html>

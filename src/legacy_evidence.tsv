@@ -1,0 +1,68 @@
+หลักฐานของรุ่นนี้ขัดกับเกณฑ์	Release evidence contradicts the criteria
+หลักฐานของรุ่นนี้ตรงตามเกณฑ์	Release evidence meets the criteria
+หลักฐานขัดแย้งกัน	Evidence conflicts
+หลักฐานไม่ครอบคลุมขอบเขต	Evidence does not cover the scope
+ข้อกำหนดอยู่นอกขอบเขตของรุ่นนี้	Requirement is outside this release's scope
+เอกสาร SHA-256 {fingerprint}	Document SHA-256 {fingerprint}
+สภาพแวดล้อมต่างจากรอบที่ตรวจ	Environment differs from the scanned environment
+commit ตรงกับรุ่นที่ตรวจ	Commit matches the scanned release
+ผู้ทบทวนต้องตรวจความสัมพันธ์ระหว่าง commit กับรุ่น	The reviewer must confirm that the commit corresponds to the release
+{binding} · CI {} · {} · {} · คาด {} · พบ {} · {} · SHA-256 {}	{binding} · CI {} · {} · {} · Expected {} · Observed {} · {} · SHA-256 {}
+ไม่มีไฟล์ Cargo.lock	Cargo.lock was not supplied
+อ่านข้อมูลแพ็กเกจจาก Cargo.lock ไม่ได้	Could not read package data from Cargo.lock
+รูปแบบหรือข้อมูลแพ็กเกจใน Cargo.lock อยู่นอกขอบเขตที่รองรับ	The Cargo.lock format or package data is unsupported
+ไม่มีข้อมูล RustSec สำหรับการตรวจครั้งนี้	RustSec data is unavailable for this scan
+มีชื่อแพ็กเกจ {} รายการจากแหล่งอื่นนอกเหนือจาก crates.io	There are {} package names from sources other than crates.io
+พบประกาศช่องโหว่สำหรับรุ่นที่ล็อก	An advisory affects the locked version
+พบประกาศเลิกดูแลสำหรับรุ่นที่ล็อก	An unmaintained advisory covers the locked version
+มีรุ่นก่อนเผยแพร่ที่ยังตรวจไม่ได้	Some prerelease versions could not be evaluated
+ไม่พบประกาศช่องโหว่ที่มีผลกับรุ่นที่ล็อก	No vulnerability advisory affects the locked version
+ไม่พบประกาศเลิกดูแลที่มีผลกับรุ่นที่ล็อก	No unmaintained advisory covers the locked version
+ไม่มีหลักฐานครบถ้วนจากคำตอบ HTTP {}	Incomplete evidence from HTTP response {}
+ไม่สามารถเก็บหลักฐานจากเป้าหมาย	Could not collect evidence from the target
+นโยบายไม่ได้ระบุให้ตรวจ	The policy does not require this check
+นโยบายไม่ได้ระบุว่าเป็นไฟล์ดาวน์โหลด	The policy does not designate a download
+พบ X-Content-Type-Options: nosniff	Found X-Content-Type-Options: nosniff
+ค่า X-Content-Type-Options ไม่ใช่ nosniff	X-Content-Type-Options is set to a value other than nosniff
+ไม่พบ X-Content-Type-Options	X-Content-Type-Options is missing
+ไม่ได้กำหนดอายุขั้นต่ำของ HSTS	A minimum HSTS max-age was not specified
+ปลายทางตอบผ่าน HTTP	The target responded over HTTP
+ไม่พบ Strict-Transport-Security	Strict-Transport-Security is missing
+อายุ HSTS {age} วินาที	HSTS max-age is {age} seconds
+อายุ HSTS {age} วินาที นโยบายกำหนดขั้นต่ำ {min} วินาที และต้องมากกว่าศูนย์	HSTS max-age is {age} seconds. Policy requires at least {min} seconds and a positive value.
+รูปแบบ Strict-Transport-Security ไม่ถูกต้อง	Strict-Transport-Security is malformed
+ไม่มีเนื้อหา HTML ที่ตรวจได้	No inspectable HTML was available
+อยู่นอกเงื่อนไขของกฎ	The rule does not apply
+ไฟล์ดาวน์โหลดไม่ได้เป็น HTML	The download is not HTML
+HTML จาก {document_location} ระบุปลายทาง HTTP: {}	HTML from {document_location} declares an HTTP destination: {}
+มีปลายทางฟอร์มที่ตรวจการใช้ HTTPS ไม่ได้	Some form destinations could not be checked for HTTPS
+ปลายทางฟอร์มและปุ่มส่งที่ระบุใช้ HTTPS	The form and its submit controls declare HTTPS destinations
+HTML ที่มีฟอร์มรหัสผ่านถูกส่งผ่าน HTTP	HTML containing a password form was served over HTTP
+ฟอร์มไม่มีตัวระบุที่ใช้เทียบซ้ำได้	The form lacks an identifier that can be used in rescans
+HTML ที่มีฟอร์มรหัสผ่านถูกส่งผ่าน HTTPS	HTML containing a password form was served over HTTPS
+{reason} ที่ {document_location}	{reason} at {document_location}
+ไม่พบฟอร์มรหัสผ่านที่ระบุ	The specified password form was not found
+ไม่พบฟอร์มใน HTML ที่ได้รับ เนื้อหาอาจสร้างด้วย JavaScript	No form was found in the received HTML. JavaScript may create it.
+ไม่พบฟอร์มรหัสผ่านใน HTML	No password form was found in the HTML
+HTML ระบุ URL ของสคริปต์ที่อ่านไม่ได้	The HTML declares an unreadable script URL
+HTML ระบุแหล่งสคริปต์ {location}	The HTML declares script source {location}
+รูปแบบ integrity ถูกต้อง ตรวจเฉพาะข้อมูลใน HTML	The integrity attribute is well-formed. Only HTML was checked.
+รูปแบบ integrity ไม่ถูกต้อง	The integrity attribute is malformed
+ไม่มี integrity	The integrity attribute is missing
+แหล่งสคริปต์ {location}: {detail}	Script source {location}: {detail}
+ไม่พบไลบรารีพร้อมรุ่นที่ระบุได้จากชื่อไฟล์หรือ URL สคริปต์ใน HTML	No library with an identifiable version was found in HTML script filenames or URLs
+ไม่มีแหล่งสคริปต์ HTTP(S) ใน HTML	No HTTP(S) script sources were found in the HTML
+เอกสารปลายทางไม่ได้ส่งผ่าน HTTPS	The final document was not served over HTTPS
+ไม่พบสคริปต์ข้ามต้นทางใน HTML	No cross-origin scripts were found in the HTML
+นโยบายไม่ได้กำหนด SRI	The policy does not require SRI
+ยังไม่ระบุ	Unspecified
+{ids} ({}) · รุ่นแรกที่แก้ไข: {fixed}	{ids} ({}) · First fixed version: {fixed}
+รุ่นที่ประกาศเทียบแบบ SemVer ไม่ได้	The declared version could not be compared using SemVer
+{declared} · มีช่วงรุ่นในประกาศที่เทียบแบบ SemVer ไม่ได้	{declared} · An advisory has a range that could not be compared using SemVer
+{declared} · พ้นช่วงที่ได้รับผลกระทบตามประกาศใน Retire.js	{declared} · Outside the affected range in Retire.js
+ไม่มีข้อมูล Retire.js สำหรับการตรวจครั้งนี้	Retire.js data is unavailable for this scan
+{declared} · URL เดียวกันระบุหลายรุ่น	{declared} · The same URL declares multiple versions
+มีหลายรายการที่จับคู่ข้ามรอบได้ จึงยืนยันการแก้ไขไม่ได้	Multiple declarations match across scans, so a fix cannot be verified
+{} · {detail} · {location} · ตรวจเฉพาะชื่อไฟล์และ URL ที่ประกาศ	{} · {detail} · {location} · Declared filenames and URLs only
+พบประกาศช่องโหว่สำหรับรุ่นที่ล็อก {}	An advisory affects the locked version {}
+พบประกาศเลิกดูแลสำหรับรุ่นที่ล็อก {}	An unmaintained advisory covers the locked version {}

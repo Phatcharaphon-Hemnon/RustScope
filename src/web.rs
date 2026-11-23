@@ -51,8 +51,8 @@ pub fn evaluate(response: Result<&HttpEvidence, &str>, policy: &Policy) -> Vec<O
     };
     let Some((response, document_url)) = evidence else {
         let reason = match response {
-            Ok(response) => format!("ไม่มีหลักฐานครบถ้วนจากคำตอบ HTTP {}", response.status),
-            Err(_) => "ไม่สามารถเก็บหลักฐานจากเป้าหมาย".into(),
+            Ok(response) => format!("Incomplete evidence from HTTP response {}", response.status),
+            Err(_) => "Could not collect evidence from the target".into(),
         };
         for (rule, item, applicable) in [
             ("A02-01", "download", policy.download),
@@ -66,7 +66,7 @@ pub fn evaluate(response: Result<&HttpEvidence, &str>, policy: &Policy) -> Vec<O
             let (outcome, observed) = if applicable {
                 (Insufficient, reason.as_str())
             } else {
-                (Na, "นโยบายไม่ได้ระบุให้ตรวจ")
+                (Na, "The policy does not require this check")
             };
             push(rule, item, outcome, observed);
         }
@@ -75,28 +75,35 @@ pub fn evaluate(response: Result<&HttpEvidence, &str>, policy: &Policy) -> Vec<O
 
     let header = |name| response.headers.get(name).map(String::as_str);
     let (outcome, observed) = match (policy.download, header("x-content-type-options")) {
-        (false, _) => (Na, "นโยบายไม่ได้ระบุว่าเป็นไฟล์ดาวน์โหลด"),
+        (false, _) => (Na, "The policy does not designate a download"),
         (true, Some(value)) if value.trim().eq_ignore_ascii_case("nosniff") => {
-            (Passed, "พบ X-Content-Type-Options: nosniff")
+            (Passed, "Found X-Content-Type-Options: nosniff")
         }
-        (true, Some(_)) => (Finding, "ค่า X-Content-Type-Options ไม่ใช่ nosniff"),
-        (true, None) => (Finding, "ไม่พบ X-Content-Type-Options"),
+        (true, Some(_)) => (
+            Finding,
+            "X-Content-Type-Options is set to a value other than nosniff",
+        ),
+        (true, None) => (Finding, "X-Content-Type-Options is missing"),
     };
     let resource = identity("download", document_url.as_str().as_bytes());
     push("A02-01", &resource, outcome, observed);
 
     let https = document_url.scheme() == "https";
     let (outcome, observed) = match (https, policy.hsts_min, header("strict-transport-security")) {
-        (_, None, _) => (Na, "ไม่ได้กำหนดอายุขั้นต่ำของ HSTS".into()),
-        (false, _, _) => (Na, "ปลายทางตอบผ่าน HTTP".into()),
-        (true, Some(_), None) => (Finding, "ไม่พบ Strict-Transport-Security".into()),
+        (_, None, _) => (Na, "A minimum HSTS max-age was not specified".into()),
+        (false, _, _) => (Na, "The target responded over HTTP".into()),
+        (true, Some(_), None) => (Finding, "Strict-Transport-Security is missing".into()),
         (true, Some(min), Some(value)) => match hsts_age(value) {
-            Some(age) if age > 0 && age >= min => (Passed, format!("อายุ HSTS {age} วินาที")),
+            Some(age) if age > 0 && age >= min => {
+                (Passed, format!("HSTS max-age is {age} seconds"))
+            }
             Some(age) => (
                 Finding,
-                format!("อายุ HSTS {age} วินาที นโยบายกำหนดขั้นต่ำ {min} วินาที และต้องมากกว่าศูนย์"),
+                format!(
+                    "HSTS max-age is {age} seconds. Policy requires at least {min} seconds and a positive value."
+                ),
             ),
-            None => (Finding, "รูปแบบ Strict-Transport-Security ไม่ถูกต้อง".into()),
+            None => (Finding, "Strict-Transport-Security is malformed".into()),
         },
     };
     push(
@@ -117,7 +124,7 @@ pub fn evaluate(response: Result<&HttpEvidence, &str>, policy: &Policy) -> Vec<O
             javascript::RULE,
             "document",
             Insufficient,
-            "ไม่มีเนื้อหา HTML ที่ตรวจได้",
+            "No inspectable HTML was available",
         );
         for (rule, applicable) in [
             ("A04-01", true),
@@ -128,11 +135,11 @@ pub fn evaluate(response: Result<&HttpEvidence, &str>, policy: &Policy) -> Vec<O
             let form_expected =
                 matches!(rule, "A04-01" | "A04-02") && policy.expected_form.is_some();
             let (outcome, observed) = if !applicable {
-                (Na, "อยู่นอกเงื่อนไขของกฎ")
+                (Na, "The rule does not apply")
             } else if policy.download && !html && !form_expected {
-                (Na, "ไฟล์ดาวน์โหลดไม่ได้เป็น HTML")
+                (Na, "The download is not HTML")
             } else {
-                (Insufficient, "ไม่มีเนื้อหา HTML ที่ตรวจได้")
+                (Insufficient, "No inspectable HTML was available")
             };
             push(rule, "document", outcome, observed);
         }
@@ -364,14 +371,20 @@ impl<F: FnMut(&str, &str, Outcome, &str)> Document<'_, F> {
                 (
                     Finding,
                     format!(
-                        "HTML จาก {document_location} ระบุปลายทาง HTTP: {}",
+                        "HTML from {document_location} declares an HTTP destination: {}",
                         bad.into_iter().collect::<Vec<_>>().join(", ")
                     ),
                 )
             } else if uncertain {
-                (Insufficient, "มีปลายทางฟอร์มที่ตรวจการใช้ HTTPS ไม่ได้".into())
+                (
+                    Insufficient,
+                    "Some form destinations could not be checked for HTTPS".into(),
+                )
             } else {
-                (Passed, "ปลายทางฟอร์มและปุ่มส่งที่ระบุใช้ HTTPS".into())
+                (
+                    Passed,
+                    "The form and its submit controls declare HTTPS destinations".into(),
+                )
             };
             inspected.push((item, submission, stable));
         }
@@ -385,34 +398,46 @@ impl<F: FnMut(&str, &str, Outcome, &str)> Document<'_, F> {
             };
             let item = &key;
             let (transport, reason) = if self.url.scheme() == "http" {
-                (Finding, "HTML ที่มีฟอร์มรหัสผ่านถูกส่งผ่าน HTTP")
+                (
+                    Finding,
+                    "HTML containing a password form was served over HTTP",
+                )
             } else if !comparable {
-                (Insufficient, "ฟอร์มไม่มีตัวระบุที่ใช้เทียบซ้ำได้")
+                (
+                    Insufficient,
+                    "The form lacks an identifier that can be used in rescans",
+                )
             } else {
-                (Passed, "HTML ที่มีฟอร์มรหัสผ่านถูกส่งผ่าน HTTPS")
+                (
+                    Passed,
+                    "HTML containing a password form was served over HTTPS",
+                )
             };
             (self.push)(
                 "A04-01",
                 item,
                 transport,
-                &format!("{reason} ที่ {document_location}"),
+                &format!("{reason} at {document_location}"),
             );
             let (outcome, observed) = if *outcome == Passed && !comparable {
-                (Insufficient, "ฟอร์มไม่มีตัวระบุที่ใช้เทียบซ้ำได้")
+                (
+                    Insufficient,
+                    "The form lacks an identifier that can be used in rescans",
+                )
             } else {
                 (*outcome, observed.as_str())
             };
             (self.push)("A04-02", item, outcome, observed);
         }
         let fallback = if self.policy.expected_form.is_some() && !expected {
-            Some((Insufficient, "ไม่พบฟอร์มรหัสผ่านที่ระบุ"))
+            Some((Insufficient, "The specified password form was not found"))
         } else if inspected.is_empty() && self.html.select(&selector("script")).next().is_some() {
             Some((
                 Insufficient,
-                "ไม่พบฟอร์มใน HTML ที่ได้รับ เนื้อหาอาจสร้างด้วย JavaScript",
+                "No form was found in the received HTML. JavaScript may create it.",
             ))
         } else if inspected.is_empty() {
-            Some((Na, "ไม่พบฟอร์มรหัสผ่านใน HTML"))
+            Some((Na, "No password form was found in the HTML"))
         } else {
             None
         };
@@ -444,7 +469,7 @@ impl<F: FnMut(&str, &str, Outcome, &str)> Document<'_, F> {
                             rule,
                             "document",
                             Insufficient,
-                            "HTML ระบุ URL ของสคริปต์ที่อ่านไม่ได้",
+                            "The HTML declares an unreadable script URL",
                         );
                     }
                 }
@@ -471,40 +496,41 @@ impl<F: FnMut(&str, &str, Outcome, &str)> Document<'_, F> {
                     "A04-03",
                     &item,
                     outcome,
-                    &format!("HTML ระบุแหล่งสคริปต์ {location}"),
+                    &format!("The HTML declares script source {location}"),
                 );
             }
             if self.policy.sri && url.origin() != self.url.origin() {
                 sri = true;
                 let (outcome, detail) = match script.attr("integrity") {
-                    Some(value) if valid_integrity(value) => {
-                        (Passed, "รูปแบบ integrity ถูกต้อง ตรวจเฉพาะข้อมูลใน HTML")
-                    }
-                    Some(_) => (Finding, "รูปแบบ integrity ไม่ถูกต้อง"),
-                    None => (Finding, "ไม่มี integrity"),
+                    Some(value) if valid_integrity(value) => (
+                        Passed,
+                        "The integrity attribute is well-formed. Only HTML was checked.",
+                    ),
+                    Some(_) => (Finding, "The integrity attribute is malformed"),
+                    None => (Finding, "The integrity attribute is missing"),
                 };
                 (self.push)(
                     "A08-04",
                     &item,
                     outcome,
-                    &format!("แหล่งสคริปต์ {location}: {detail}"),
+                    &format!("Script source {location}: {detail}"),
                 );
             }
         }
         libraries.report(&mut self.push);
         if !mixed {
             let observed = if https {
-                "ไม่มีแหล่งสคริปต์ HTTP(S) ใน HTML"
+                "No HTTP(S) script sources were found in the HTML"
             } else {
-                "เอกสารปลายทางไม่ได้ส่งผ่าน HTTPS"
+                "The final document was not served over HTTPS"
             };
             (self.push)("A04-03", "document", Na, observed);
         }
         if !sri {
             let observed = if self.policy.sri {
-                "ไม่พบสคริปต์ข้ามต้นทางใน HTML"
+                "No cross-origin scripts were found in the HTML"
             } else {
-                "นโยบายไม่ได้กำหนด SRI"
+                "The policy does not require SRI"
             };
             (self.push)("A08-04", "document", Na, observed);
         }
@@ -807,8 +833,8 @@ mod tests {
                 "3.4.1",
                 "CVE-2020-11022",
                 "GHSA-gxr4-xjj5-5px2",
-                "รุ่นแรกที่แก้ไข: 3.5.0",
-                "ตรวจเฉพาะชื่อไฟล์และ URL",
+                "First fixed version: 3.5.0",
+                "Declared filenames and URLs only",
             ] {
                 assert!(observed.contains(detail), "{detail}: {observed}");
             }

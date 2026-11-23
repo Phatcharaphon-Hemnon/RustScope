@@ -7,7 +7,7 @@ use std::sync::LazyLock;
 pub(crate) const VULNERABILITIES: &str = "A03-01";
 pub(crate) const MAINTENANCE: &str = "A03-02";
 const RULES: [&str; 2] = [VULNERABILITIES, MAINTENANCE];
-const MISSING_LOCKFILE: &str = "ไม่มีไฟล์ Cargo.lock";
+const MISSING_LOCKFILE: &str = "Cargo.lock was not supplied";
 
 static OFFLINE_SNAPSHOT: LazyLock<Option<Snapshot>> = LazyLock::new(|| {
     serde_json::from_str::<Snapshot>(include_str!("../fixtures/advisories/rustsec.json"))
@@ -59,7 +59,7 @@ pub(crate) fn is_missing_lockfile(observation: &Observation) -> bool {
     RULES.contains(&observation.rule.as_str())
         && observation.item == "Cargo.lock"
         && observation.outcome == Outcome::Insufficient
-        && observation.observed == MISSING_LOCKFILE
+        && crate::legacy_evidence::evidence(&observation.observed) == MISSING_LOCKFILE
 }
 
 fn evaluate_snapshot(lock: Option<&str>, snapshot: Option<&Snapshot>) -> Vec<Observation> {
@@ -67,7 +67,7 @@ fn evaluate_snapshot(lock: Option<&str>, snapshot: Option<&Snapshot>) -> Vec<Obs
         return insufficient(MISSING_LOCKFILE);
     };
     let Ok(lockfile) = toml::from_str::<Lockfile>(lock) else {
-        return insufficient("อ่านข้อมูลแพ็กเกจจาก Cargo.lock ไม่ได้");
+        return insufficient("Could not read package data from Cargo.lock");
     };
     if lockfile
         .version
@@ -82,10 +82,10 @@ fn evaluate_snapshot(lock: Option<&str>, snapshot: Option<&Snapshot>) -> Vec<Obs
                     .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
         })
     {
-        return insufficient("รูปแบบหรือข้อมูลแพ็กเกจใน Cargo.lock อยู่นอกขอบเขตที่รองรับ");
+        return insufficient("The Cargo.lock format or package data is unsupported");
     }
     let Some(snapshot) = snapshot else {
-        return insufficient("ไม่มีข้อมูล RustSec สำหรับการตรวจครั้งนี้");
+        return insufficient("RustSec data is unavailable for this scan");
     };
 
     let mut public = BTreeMap::<String, BTreeSet<Version>>::new();
@@ -109,7 +109,7 @@ fn evaluate_snapshot(lock: Option<&str>, snapshot: Option<&Snapshot>) -> Vec<Obs
     let mut results = Vec::new();
     if !unsupported.is_empty() {
         let summary = format!(
-            "มีชื่อแพ็กเกจ {} รายการจากแหล่งอื่นนอกเหนือจาก crates.io",
+            "There are {} package names from sources other than crates.io",
             unsupported.len()
         );
         for rule in RULES {
@@ -158,18 +158,21 @@ fn evaluate_snapshot(lock: Option<&str>, snapshot: Option<&Snapshot>) -> Vec<Obs
 
             let (outcome, summary) = if !matches.is_empty() {
                 let label = if kind == Kind::Vulnerability {
-                    "พบประกาศช่องโหว่สำหรับรุ่นที่ล็อก"
+                    "An advisory affects the locked version"
                 } else {
-                    "พบประกาศเลิกดูแลสำหรับรุ่นที่ล็อก"
+                    "An unmaintained advisory covers the locked version"
                 };
                 (Outcome::Finding, format!("{label} {}", matches.join(", ")))
             } else if prerelease {
-                (Outcome::Insufficient, "มีรุ่นก่อนเผยแพร่ที่ยังตรวจไม่ได้".to_string())
+                (
+                    Outcome::Insufficient,
+                    "Some prerelease versions could not be evaluated".to_string(),
+                )
             } else {
                 let label = if kind == Kind::Vulnerability {
-                    "ไม่พบประกาศช่องโหว่ที่มีผลกับรุ่นที่ล็อก"
+                    "No vulnerability advisory affects the locked version"
                 } else {
-                    "ไม่พบประกาศเลิกดูแลที่มีผลกับรุ่นที่ล็อก"
+                    "No unmaintained advisory covers the locked version"
                 };
                 (Outcome::Passed, label.to_string())
             };

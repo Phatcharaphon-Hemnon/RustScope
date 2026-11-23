@@ -1,20 +1,29 @@
-<details id="catalog" class="panel catalog-panel"{% if catalog_open %} open{% endif %}>
-<summary>ดูกฎมาตรฐาน (60) และส่วนขยาย</summary>
-<p class="hint">A ตรวจหลักฐานโดยตรง · S วิเคราะห์ซอร์สโค้ดและทบทวนโดยนักพัฒนา · E ทบทวนตามนโยบายหรือหลักฐานภายใน</p>
+<section id="catalog" class="panel">{% if standalone %}<h1>Rule catalog</h1>{% else %}<h2>Rule catalog</h2>{% endif %}
+<div class="filters" hidden>
+<label>Search rules <input type="search" id="rule-search"></label>
+<label>Category <select id="category"><option value="">All categories</option></select></label>
+<label>Check type <select id="method"><option value="">All check types</option></select></label></div>
+<div class="catalog-head" aria-hidden="true"><span>Rule ID</span><span>Name</span><span>OWASP category</span><span>Check type</span><span>Implementation</span></div>
 {% for rule in rules %}
-{% if rule.method == "X" %}<h3>ส่วนขยาย</h3>{% endif %}
-<details class="catalog-entry">
-  <summary><strong>{{ rule.id }} {{ rule.name }}</strong> · {{ rule.method }} · {% if rule.implemented %}ตรวจอัตโนมัติได้{% elif rule.method == "E" %}รองรับการทบทวนโดยคน{% else %}อยู่ในแผน{% endif %}</summary>
+<details class="catalog-entry" data-id="{{ rule.id }}" data-name="{{ rule.name }}" data-category="{{ rule.category }}" data-method="{{ rule.method }}">
+<summary>
+<dl class="catalog-row">
+<div><dt>Rule ID</dt><dd><code>{{ rule.id }}</code></dd></div> <div><dt>Name</dt><dd>{{ rule.name }}</dd></div>
+<div><dt>OWASP category</dt><dd>{{ rule.category }}</dd></div>
+<div><dt>Check type</dt><dd>{{ rule.method }} · {% match rule.method %}{% when "A" %}Direct{% when "E" %}Review{% when "S" %}Source{% else %}Extension{% endmatch %}</dd></div>
+<div><dt>Implementation</dt><dd>{% if rule.implemented %}Automated{% elif rule.method == "E" %}Manual review{% else %}Planned{% endif %}</dd></div></dl>
+</summary>
   <dl>
-    <dt>หมวด OWASP</dt><dd>{{ rule.category }}</dd>
-    <dt>รุ่นกฎ</dt><dd>{{ rule.version }}</dd>
-    <dt>ข้อมูลและเงื่อนไขการใช้</dt><dd>{{ rule.inputs }} · {{ rule.applicability }}</dd>
-    <dt>หลักฐานและเกณฑ์ตัดสิน</dt><dd>{{ rule.evidence }}</dd>
-    <dt>ผลกระทบ</dt><dd>{{ rule.impact }}</dd>
-    <dt>ความรุนแรง / ความมั่นใจ</dt><dd>{{ rule.severity }} / {{ rule.confidence }}</dd>
-    <dt>วิธีแก้</dt><dd>{{ rule.remediation }}</dd>
-    <dt>เกณฑ์ยืนยันการแก้ไข</dt><dd>{{ rule.closure }}</dd>
+    <dt>OWASP category</dt><dd>{{ rule.category }}</dd>
+    <dt>Rule version</dt><dd>{{ rule.version }}</dd>
+    <dt>Inputs and applicability</dt><dd>{{ rule.inputs }} · {{ rule.applicability }}</dd>
+    <dt>Evidence and decision criteria</dt><dd>{{ rule.evidence }}</dd>
+    <dt>Impact</dt><dd>{{ rule.impact }}</dd>
+    <dt>Severity / confidence</dt><dd>{{ rule.severity }} / {{ rule.confidence }}</dd>
+    <dt>Remediation</dt><dd>{{ rule.remediation }}</dd>
+    <dt>Fix verification criteria</dt><dd>{{ rule.closure }}</dd>
   </dl>
 </details>
 {% endfor %}
-</details>
+<div id="no-rules" hidden>
+<p role="status">No matching rules</p><button type="button">Clear filters</button></div></section>

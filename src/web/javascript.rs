@@ -124,10 +124,10 @@ impl Advisory {
             .join(", ");
         // Retire.js uses 999 upper bounds for open-ended or end-of-life ranges.
         let fixed = match self.below.as_str() {
-            "999.0.0" | "999.999.999" | "1.999" | "2.999.999" | "3.999.999" => "ยังไม่ระบุ",
+            "999.0.0" | "999.999.999" | "1.999" | "2.999.999" | "3.999.999" => "Unspecified",
             below => below,
         };
-        format!("{ids} ({}) · รุ่นแรกที่แก้ไข: {fixed}", self.severity)
+        format!("{ids} ({}) · First fixed version: {fixed}", self.severity)
     }
 }
 
@@ -150,7 +150,10 @@ fn parse_bound(value: &str) -> Option<Version> {
 impl Library {
     fn assess(&self, declared: &str) -> (Outcome, String) {
         let Ok(version) = Version::parse(declared) else {
-            return (Insufficient, "รุ่นที่ประกาศเทียบแบบ SemVer ไม่ได้".into());
+            return (
+                Insufficient,
+                "The declared version could not be compared using SemVer".into(),
+            );
         };
         let mut findings = BTreeSet::new();
         let mut uncertain = false;
@@ -169,12 +172,14 @@ impl Library {
         } else if uncertain {
             (
                 Insufficient,
-                format!("{declared} · มีช่วงรุ่นในประกาศที่เทียบแบบ SemVer ไม่ได้"),
+                format!(
+                    "{declared} · An advisory has a range that could not be compared using SemVer"
+                ),
             )
         } else {
             (
                 Passed,
-                format!("{declared} · พ้นช่วงที่ได้รับผลกระทบตามประกาศใน Retire.js"),
+                format!("{declared} · Outside the affected range in Retire.js"),
             )
         }
     }
@@ -242,7 +247,7 @@ impl Scripts {
                     exact_item: format!("{exact_item}/{}/{i}", library.name),
                     outcome,
                     detail: format!(
-                        "{} · {detail} · {location} · ตรวจเฉพาะชื่อไฟล์และ URL ที่ประกาศ",
+                        "{} · {detail} · {location} · Declared filenames and URLs only",
                         library.name
                     ),
                 });
@@ -253,9 +258,9 @@ impl Scripts {
     pub(super) fn report(self, push: &mut impl FnMut(&str, &str, Outcome, &str)) {
         if self.by_logical_item.is_empty() {
             let reason = if SNAPSHOT.is_none() {
-                "ไม่มีข้อมูล Retire.js สำหรับการตรวจครั้งนี้"
+                "Retire.js data is unavailable for this scan"
             } else {
-                "ไม่พบไลบรารีพร้อมรุ่นที่ระบุได้จากชื่อไฟล์หรือ URL สคริปต์ใน HTML"
+                "No library with an identifiable version was found in HTML script filenames or URLs"
             };
             push(RULE, "document", Insufficient, reason);
         }
@@ -266,9 +271,9 @@ impl Scripts {
                     if declaration.outcome == Passed {
                         declaration.outcome = Insufficient;
                     }
-                    declaration
-                        .detail
-                        .push_str(" · มีหลายรายการที่จับคู่ข้ามรอบได้ จึงยืนยันการแก้ไขไม่ได้");
+                    declaration.detail.push_str(
+                        " · Multiple declarations match across scans, so a fix cannot be verified",
+                    );
                     push(
                         RULE,
                         &format!("ambiguous/{}", declaration.exact_item),

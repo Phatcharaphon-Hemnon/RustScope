@@ -1,8 +1,9 @@
 {% extends "base.html" %}
-{% block title %}ทะเบียนกฎ · RustScope{% endblock %}
+{% block account %}{% include "account.html" %}{% endblock %}
+{% block title %}Rule catalog · RustScope{% endblock %}
 {% block content %}
-<nav class="audit-nav"><a href="/">โปรเจกต์ของคุณ</a></nav>
-<h1>ทะเบียนกฎ</h1>
-{% let catalog_open = true %}
+<nav aria-label="Breadcrumb"><a href="/">Projects</a> / Rule catalog</nav>
+
+{% let standalone = true %}
 {% include "catalog.html" %}
 {% endblock %}
