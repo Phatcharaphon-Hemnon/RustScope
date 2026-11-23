@@ -1,0 +1,10 @@
+services:
+  rustscope:
+    build: .
+    ports:
+      - "127.0.0.1:3100:3100"
+    volumes:
+      - rustscope-state:/var/lib/rustscope
+
+volumes:
+  rustscope-state:

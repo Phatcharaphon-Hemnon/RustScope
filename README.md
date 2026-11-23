@@ -2,6 +2,27 @@
 
 RustScope assesses owner-approved web resources and release evidence, produces English reports, and compares rescans. It uses Rust, Axum, Tokio, reqwest, scraper, Askama and SQLx/SQLite. All eight automated checks run inside the application. The offline demo requires no target website, advisory service or ZAP installation.
 
+## Run with Docker
+
+With Git, Docker, and Docker Compose installed, clone the repository and run this command from its root. The app uses the checked-in stylesheet and an embedded SQLite database.
+
+```sh
+docker compose up --build -d
+```
+
+1. Open **http://localhost:3100** and select **Create account**. Choose a username and a password of at least 12 characters and up to 256 bytes. RustScope signs you in automatically.
+2. Create an **Offline demo** project. Enter a release name, keep the default fixture and policies, then select **Start scan** to open the report. The report refreshes automatically while the scan is queued or running.
+
+View logs with `docker compose logs -f`. Stop with `docker compose down`. The named volume retains accounts, the SQLite database, and its encryption key. Run one RustScope instance per volume. After changing the code, rerun `docker compose up --build -d` to rebuild and restart with the same state.
+
+### Publish to Docker Hub
+
+1. Create a `rustscope` repository in your Docker Hub namespace and generate a Docker Hub access token with write access. [Docker Hub access tokens](https://docs.docker.com/security/access-tokens/)
+2. In GitHub repository settings under **Secrets and variables → Actions**, set `DOCKERHUB_USERNAME` as a repository variable and `DOCKERHUB_TOKEN` as a repository secret.
+3. Open **Actions → Docker Hub image → Run workflow** and select `main`. Subsequent pushes to `main` also build and publish. With the username unset, the workflow only builds.
+
+The workflow publishes `DOCKERHUB_USERNAME/rustscope:latest` and `DOCKERHUB_USERNAME/rustscope:sha-<full-commit>` for Linux x86-64.
+
 ## Start from a clean checkout
 
 Use Linux, a current stable Rust toolchain with Cargo, a C toolchain, and Python 3 for the demo. The verified build used rustc 1.99.1. The first build needs access to crates.io. After fetching the locked dependencies, builds and tests can run with Cargo’s `--offline` flag.
@@ -14,7 +35,7 @@ Open **http://localhost:3100**, choose **Create account**, and create an account
 
 Existing accounts can sign in with their current credentials. To provision an account from the terminal, run `cargo run --locked -- account USER`. The command prints its generated password once.
 
-Set `RUSTSCOPE_STATE` to select the private state directory (default `./state`) and `RUSTSCOPE_PORT` to change the port. Run one server per state directory. Keep the SQLite database and its mode-0600 encryption key together in a protected backup with the account files. Losing the key prevents URL recovery.
+Set `RUSTSCOPE_STATE` to select the private state directory (default `./state`) and `RUSTSCOPE_PORT` to change the port. `RUSTSCOPE_BIND` sets the listening IPv4 address and defaults to `127.0.0.1`. The HTTP host allowlist accepts `localhost` and `127.0.0.1` on the configured port. Run one server per state directory. Keep the SQLite database and its mode-0600 encryption key together in a protected backup with the account files. Losing the key prevents URL recovery.
 
 ## Update the interface styles
 

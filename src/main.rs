@@ -767,13 +767,19 @@ async fn main() -> anyhow::Result<()> {
     let port = std::env::var("RUSTSCOPE_PORT")
         .unwrap_or_else(|_| "3100".into())
         .parse::<u16>()?;
-    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, port)).await?;
+    let bind = std::env::var("RUSTSCOPE_BIND")
+        .map_or(Ok(Ipv4Addr::LOCALHOST), |value| value.parse())
+        .context("invalid RUSTSCOPE_BIND IPv4 address")?;
+    let listener = tokio::net::TcpListener::bind((bind, port)).await?;
     let address = listener.local_addr()?;
     let app = Arc::new(App {
         store: Store::open(&dir.join("rustscope.sqlite")).await?,
         accounts: dir,
         sessions: Sessions::default(),
-        hosts: [address.to_string(), format!("localhost:{}", address.port())],
+        hosts: [
+            format!("127.0.0.1:{}", address.port()),
+            format!("localhost:{}", address.port()),
+        ],
         wake: Default::default(),
     });
     let router = Router::new()
@@ -828,9 +834,13 @@ async fn main() -> anyhow::Result<()> {
         .layer(DefaultBodyLimit::max(1024 * 1024))
         .layer(middleware::from_fn_with_state(app.clone(), guard))
         .with_state(app.clone());
+    let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+    let server = axum::serve(listener, router).with_graceful_shutdown(async move {
+        terminate.recv().await;
+    });
     println!("RustScope http://{address}");
     tokio::select! {
-        result=axum::serve(listener,router).into_future()=> result?,
+        result=server.into_future()=>result?,
         result=worker(&app)=>result?,
     }
     Ok(())
