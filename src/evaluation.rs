@@ -1,6 +1,11 @@
 //! Held-out, labelled examples. Metrics are per target/rule, with abstentions counted separately.
-use super::*;
-use domain::Outcome;
+use crate::{
+    dependencies,
+    domain::{self, Outcome},
+    model::Policy,
+    scope::HttpEvidence,
+    web,
+};
 use std::collections::BTreeMap;
 
 #[derive(Default)]

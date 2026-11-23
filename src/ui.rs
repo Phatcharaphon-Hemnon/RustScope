@@ -1,6 +1,6 @@
 use crate::auth::Session;
 use crate::{
-    REASONS,
+    app::{Fields, REASONS},
     dependencies::{MAINTENANCE, VULNERABILITIES},
     domain::{
         Change, ChangeStatus, Observation, Outcome, Round, Rule, catalog, compare, extensions,
@@ -103,7 +103,7 @@ fn visible_rules() -> Vec<Rule> {
 pub struct Feedback<'a> {
     pub field: &'a str,
     pub message: &'a str,
-    pub values: Option<&'a crate::Fields>,
+    pub values: Option<&'a Fields>,
 }
 
 impl Feedback<'_> {
