@@ -10,12 +10,12 @@
 <header class="project-head" id="overview">
 <div>
 <h1>{{ p.name }}</h1>
-<p>{{ role_label }} · {% if p.demo %}Offline demo{% else %}Live{% endif %} · {% if !active %}<span class="pending">◷ Expired</span>{% elif p.verified %}<span class="verified">✓ Verified</span>{% else %}<span class="pending">◷ Awaiting verification</span>{% endif %}</p>
+<p class="subtitle">{{ role_label }} · {% if p.demo %}Offline demo{% else %}Live{% endif %} · {% if !active %}<span class="pending">Expired</span>{% elif p.verified %}<span class="verified">Verified</span>{% else %}<span class="pending">Awaiting verification</span>{% endif %}</p>
 <details>
 <summary>{% if active %}Expires{% else %}Expired{% endif %} {{ crate::ui::utc_date(p.expires) }} · Timestamp details</summary><code>{{ p.expires }}</code> Unix seconds</details>
 <p>Scope <code>{{ scope_url }}</code>{% if p.upgrade %} · Includes HTTPS on the same host and path{% endif %}</p></div>
 <div>{% if owner %}
-{% if !active %}<a class="primary" href="#renew">Renew scope</a>{% elif p.verified %}<a class="primary" href="#scan">Prepare scan</a>{% else %}<form action="/p/{{ p.id }}/verify" method="post"><input type="hidden" name="csrf" value="{{ session.csrf }}"><button class="primary">Check verification</button></form>
+{% if !active %}<a class="button" href="#renew">Renew scope</a>{% elif p.verified %}<a class="button" href="#scan">Prepare scan</a>{% else %}<form action="/p/{{ p.id }}/verify" method="post"><input type="hidden" name="csrf" value="{{ session.csrf }}"><button class="primary">Check verification</button></form>
 {% endif %}
 {% elif let Some(latest) = scans.last() %}<a class="primary" href="/p/{{ p.id }}/s/{{ latest.id }}">Open latest report</a>{% else %}<a class="primary" href="#catalog">Browse rules</a>{% endif %}</div></header>
 <nav class="sections" aria-label="Project sections"><a href="#overview" aria-current="location">Overview</a>{% if owner %}<a href="#scan">Scan</a><a href="#members">Members</a>{% endif %}<a href="#history">History</a><a href="#catalog">Rules</a></nav>
@@ -28,7 +28,7 @@
 <input type="hidden" name="csrf" value="{{ session.csrf }}">
 <label>New scope duration (days) <input name="days" type="number" min="1" max="30" value="{{ feedback.value("days", "7") }}" required {% if feedback.field == "days" %}aria-invalid="true" aria-errormessage="days-error"{% endif %}></label>
 {% call error("days") %}
-<div><button>Renew scope</button></div>
+<div><button class="primary">Renew scope</button></div>
 </form>
 {% elif !p.verified %}<h2>Verify scope</h2>{% call error("verification") %}
 <ol class="steps">
@@ -43,7 +43,7 @@
 <h3>Verified</h3>
 <p>Awaiting verification</p></li></ol>
 {% else %}
-<h2>Scan</h2>
+<h2 class="panel-heading">Scan</h2>
 <form action="/p/{{ p.id }}/scan" method="post" class="stack">
 <input type="hidden" name="csrf" value="{{ session.csrf }}"><input type="hidden" name="request_id" value="{{ request_id }}">
 {% if scan_form.previewed %}<input type="hidden" name="has_preview" value="on">{% endif %}
@@ -57,19 +57,25 @@
 <legend>Release evidence</legend>
 <label>Release <input name="release" {% if feedback.field == "release" %}aria-invalid="true" aria-errormessage="release-error"{% endif %} value="{{ feedback.value("release", scan_form.release) }}" placeholder="v1.0" required></label>{% call error("release") %}
 {% if p.demo %}<label>Demo evidence <select name="fixture" {% if feedback.field == "fixture" %}aria-invalid="true" aria-errormessage="fixture-error"{% endif %}>{% for (key,label) in [("issue","Form submits over HTTP"),("forbidden","Target responds with 403"),("persistent","Form still submits over HTTP"),("fixed","Fixed form submits over HTTPS")] %}<option value="{{ key }}"{% if feedback.value("fixture", scan_form.fixture) == *key %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>{% call error("fixture") %}{% endif %}
+</fieldset>
+</div>
+<details class="scan-options" {% if scan_form.lockfile_used || feedback.field == "lock" || !feedback.value("lock", "").is_empty() %}open{% endif %}>
+<summary>Cargo.lock evidence</summary>
+<div class="stack">
 {% let hide_lock_contents = scan_form.previewed || feedback.value("preview", "") == "on" %}
 <label>Cargo.lock <textarea name="lock" {% if feedback.field == "lock" %}aria-invalid="true" aria-errormessage="lock-error"{% endif %} rows="4" spellcheck="false" aria-describedby="lock-hint">{% if !hide_lock_contents %}{{ feedback.value("lock", "") }}{% endif %}</textarea></label><output id="lock-count"></output>{% call error("lock") %}<p id="lock-hint" class="hint">{% if scan_form.lockfile_used %}Leave blank to reuse the dependency results for this release and environment, or paste a replacement Cargo.lock.{% elif p.demo %}Leave blank to use the demo file.{% else %}Optional for URL-only scans.{% endif %}</p>
 {% if hide_lock_contents && !feedback.value("lock", "").is_empty() %}<p class="hint">Paste your Cargo.lock again after correcting the highlighted field.</p>{% endif %}
-{% if scan_form.lockfile_used %}<label><input type="checkbox" name="discard_preview_lock"{% if feedback.value("discard_preview_lock", "") == "on" %} checked{% endif %}> Discard the previous Cargo.lock results</label>{% endif %}</fieldset>
+{% if scan_form.lockfile_used %}<label><input type="checkbox" name="discard_preview_lock"{% if feedback.value("discard_preview_lock", "") == "on" %} checked{% endif %}> Discard the previous Cargo.lock results</label>{% endif %}
 </div>
-<details id="scan-policy" {% if feedback.field == "expected_form" || feedback.field == "hsts_min" %}open{% endif %}>
+</details>
+<details class="scan-options" id="scan-policy" {% if feedback.field == "expected_form" || feedback.field == "hsts_min" %}open{% endif %}>
 <summary>Policy</summary>
 <div class="form-grid">
 <label><input name="download" type="checkbox"{% if feedback.checked("download", scan_form.download) %} checked{% endif %}> Download target</label>
 <label>Minimum HSTS max-age (seconds) <input name="hsts_min" {% if feedback.field == "hsts_min" %}aria-invalid="true" aria-errormessage="hsts_min-error"{% endif %} type="number" min="0" value="{{ feedback.value("hsts_min", scan_form.hsts_min) }}"></label>{% call error("hsts_min") %}
 <label>Expected form ID <input name="expected_form" {% if feedback.field == "expected_form" %}aria-invalid="true" aria-errormessage="expected_form-error"{% endif %} value="{{ feedback.value("expected_form", scan_form.expected_form) }}"></label>{% call error("expected_form") %}
 <label><input name="sri" type="checkbox"{% if feedback.checked("sri", scan_form.sri) %} checked{% endif %}> Require SRI for external scripts</label></div></details>
-<div id="scan-actions" class="actions"><button class="start-scan">Start scan</button><button name="preview" value="on" formaction="/p/{{ p.id }}/scan#scan-readiness">Check readiness</button></div>
+<div id="scan-actions" class="actions"><button class="primary">Start scan</button><button name="preview" value="on" formaction="/p/{{ p.id }}/scan#scan-readiness">Check readiness</button></div>
 </form>
 {% if scan_form.previewed %}
 <section id="scan-readiness" aria-labelledby="scan-readiness-title">
@@ -85,7 +91,7 @@
 {% endif %}
 <section class="panel" id="history">
 <h2>Scan history</h2>
-{% if scans.is_empty() %}<p>No scans yet.{% if !owner %} The project owner can start a scan.{% endif %}</p>{% if owner && active && p.verified %}<a href="#scan">Prepare scan</a>{% endif %}
+{% if scans.is_empty() %}<p>No scans yet.{% if !owner %} The project owner can start a scan.{% endif %}</p>
 {% else %}
 <table>
 <thead>
