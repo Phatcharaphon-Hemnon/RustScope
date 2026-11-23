@@ -4,6 +4,7 @@ use crate::{
     dependencies::{MAINTENANCE, VULNERABILITIES},
     domain::{Outcome, Rule, catalog, extensions},
     model::{Project, Scan},
+    preflight::Draft,
     scope::{Scope, safe_url},
     web::redacted_location,
 };
@@ -87,6 +88,56 @@ struct ProjectPage<'a> {
     request_id: &'a str,
     rules: Vec<Rule>,
     evidence: EvidenceGroups<'a>,
+    scan_form: ScanForm<'a>,
+}
+
+struct ScanForm<'a> {
+    release: &'a str,
+    target: &'a str,
+    environment: &'a str,
+    fixture: &'a str,
+    download: bool,
+    hsts_min: Option<u64>,
+    expected_form: &'a str,
+    sri: bool,
+    previewed: bool,
+    lockfile_used: bool,
+}
+
+impl<'a> ScanForm<'a> {
+    fn new(project: &'a Project, draft: Option<&'a Draft>) -> Self {
+        if let Some(draft) = draft {
+            let scan = &draft.scan;
+            return Self {
+                release: &scan.release,
+                target: &scan.target,
+                environment: &scan.environment,
+                fixture: &draft.fixture,
+                download: scan.policy.download,
+                hsts_min: scan.policy.hsts_min,
+                expected_form: scan.policy.expected_form.as_deref().unwrap_or_default(),
+                sri: scan.policy.sri,
+                previewed: true,
+                lockfile_used: draft.lockfile_used,
+            };
+        }
+        Self {
+            release: "",
+            target: if project.demo {
+                "https://fixture.invalid/login"
+            } else {
+                &project.base
+            },
+            environment: "test",
+            fixture: "issue",
+            download: project.demo,
+            hsts_min: project.demo.then_some(3600),
+            expected_form: if project.demo { "login" } else { "" },
+            sri: project.demo,
+            previewed: false,
+            lockfile_used: false,
+        }
+    }
 }
 
 pub fn project(
@@ -96,6 +147,7 @@ pub fn project(
     csrf: &str,
     request_id: &str,
     verification_error: &str,
+    draft: Option<&Draft>,
 ) -> anyhow::Result<String> {
     let owner = role == "owner";
     let scope = Scope::new(&p.base, p.expires).ok();
@@ -124,7 +176,8 @@ pub fn project(
         scans,
         csrf,
         request_id,
-        evidence: evidence_groups(&rules, None),
+        evidence: evidence_groups(&rules, draft.map(|draft| &draft.scan)),
+        scan_form: ScanForm::new(p, draft),
         rules,
     }
     .render()?)
@@ -208,25 +261,6 @@ fn evidence_groups<'a>(rules: &[Rule], scan: Option<&'a Scan>) -> EvidenceGroups
     groups
 }
 
-#[derive(Template)]
-#[template(path = "preview.html")]
-struct Preview<'a> {
-    p: &'a Project,
-    scan: &'a Scan,
-    target: String,
-    evidence: EvidenceGroups<'a>,
-}
-
-pub fn preview(p: &Project, scan: &Scan) -> anyhow::Result<String> {
-    Ok(Preview {
-        p,
-        scan,
-        target: report_target(p, scan),
-        evidence: evidence_groups(&visible_rules(), Some(scan)),
-    }
-    .render()?)
-}
-
 fn dependency_readiness<'a>(scan: &'a Scan, rule: &str) -> &'a str {
     let mut observations = scan.results.iter().filter(|obs| obs.rule == rule);
     if observations
@@ -291,6 +325,8 @@ mod tests {
             demo: false,
             upgrade: false,
         };
+        let mut provenance = crate::domain::EvaluationProvenance::at_enqueue();
+        provenance.record_web_evaluation();
         let scan = Scan {
             id: "s1".into(),
             project: project.id.clone(),
@@ -303,7 +339,8 @@ mod tests {
                 expected_form: None,
             },
             environment: "test".into(),
-            version: "1".into(),
+            version: crate::domain::RULESET_VERSION.into(),
+            provenance,
             at: 1,
             observed_at: 2,
             status: "complete".into(),
@@ -320,12 +357,12 @@ mod tests {
     #[test]
     fn templates_escape_evidence_and_hide_owner_actions() {
         let (p, scan) = example();
-        let viewer = project(&p, "viewer", &[], "csrf", "request", "").unwrap();
+        let viewer = project(&p, "viewer", &[], "csrf", "request", "", None).unwrap();
         assert!(!viewer.contains(&p.challenge));
         assert!(!viewer.contains("/verify"));
         assert!(!viewer.contains("/member"));
         assert!(viewer.contains("A10-06"));
-        let owner = project(&p, "owner", &[], "csrf", "request", "").unwrap();
+        let owner = project(&p, "owner", &[], "csrf", "request", "", None).unwrap();
         assert!(owner.contains(&p.challenge));
         assert!(owner.contains("/verify"));
 
@@ -435,14 +472,21 @@ mod tests {
 
     #[test]
     fn preflight_lists_implemented_rules_and_missing_inputs() {
-        let (p, mut scan) = example();
+        let (mut p, mut scan) = example();
+        p.verified = true;
         scan.results = vec![Observation {
             rule: "A03-01".into(),
             item: "Cargo.lock".into(),
             outcome: Outcome::Insufficient,
             observed: "ไม่มีไฟล์ Cargo.lock".into(),
         }];
-        let body = preview(&p, &scan).unwrap();
+        let draft = Draft {
+            scan,
+            fixture: String::new(),
+            lockfile_used: false,
+        };
+        let body = project(&p, "owner", &[], "csrf", "request", "", Some(&draft)).unwrap();
+        assert!(body.contains("id=\"scan-readiness\""));
         assert_eq!(body.matches("data-rule=").count(), 9);
         assert!(body.contains("ไม่มีไฟล์ Cargo.lock"));
         assert!(body.contains("รอ HTML ตอบกลับ"));
@@ -475,9 +519,15 @@ mod tests {
         p.verified = true;
         scan.results = crate::dependencies::evaluate(None);
         let selector = |expression| Selector::parse(expression).unwrap();
-        let project = project(&p, "owner", &[], "csrf", "request", "").unwrap();
-        assert!(project.contains("aria-describedby=\"lock-hint\""));
-        for page in [project, preview(&p, &scan).unwrap()] {
+        let form = project(&p, "owner", &[], "csrf", "request", "", None).unwrap();
+        assert!(form.contains("aria-describedby=\"lock-hint\""));
+        let draft = Draft {
+            scan: scan.clone(),
+            fixture: String::new(),
+            lockfile_used: false,
+        };
+        let readiness = project(&p, "owner", &[], "csrf", "request", "", Some(&draft)).unwrap();
+        for page in [form, readiness] {
             let html = Html::parse_document(&page);
             let rules = |group| {
                 html.select(&selector(group))
@@ -567,5 +617,17 @@ mod tests {
         assert!(body.contains("data-change=\"NotComparable\""));
         assert!(!body.contains("data-change=\"VerifiedFixed\""));
         assert!(body.contains("/s/s2/review"));
+    }
+
+    #[test]
+    fn failed_scan_does_not_present_results_or_allow_review() {
+        let (p, mut scan) = example();
+        scan.status = "failed".into();
+        let body =
+            report::render(&p, "owner", &scan, &[], &[], "csrf", Default::default()).unwrap();
+        assert!(body.contains("data-status=\"failed\""));
+        assert!(body.contains("ตรวจไม่สำเร็จ"));
+        assert!(!body.contains("id=\"results\""));
+        assert!(!body.contains("/s/s1/review"));
     }
 }

@@ -44,6 +44,7 @@ struct Report<'a> {
     target: String,
     csrf: &'a str,
     pending: bool,
+    failed: bool,
     may_review: bool,
     view: ReportView,
     reasons: &'static [&'static str],
@@ -73,9 +74,10 @@ pub(crate) fn render(
     view: ReportView,
 ) -> anyhow::Result<String> {
     let pending = in_progress(scan);
+    let failed = scan.status == "failed";
     let mut changes = Vec::new();
-    if !pending {
-        let finished: Vec<_> = history.iter().filter(|scan| !in_progress(scan)).collect();
+    if !pending && !failed {
+        let finished: Vec<_> = history.iter().filter(|scan| assessed(scan)).collect();
         let policies = finished
             .iter()
             .map(|scan| serde_json::to_string(&(&scan.policy, &scan.environment)))
@@ -88,6 +90,7 @@ pub(crate) fn render(
                 target: &scan.target,
                 policy,
                 version: &scan.version,
+                provenance: &scan.provenance,
                 observations: &scan.results,
             })
             .collect();
@@ -97,7 +100,7 @@ pub(crate) fn render(
     let observations: Vec<_> = scan
         .results
         .iter()
-        .filter(|_| !pending)
+        .filter(|_| assessed(scan))
         .filter_map(|obs| {
             rules
                 .iter()
@@ -107,7 +110,7 @@ pub(crate) fn render(
         .collect();
     let reviews = reviews
         .iter()
-        .filter(|review| review.scan == scan.id && !pending)
+        .filter(|review| review.scan == scan.id && assessed(scan))
         .filter_map(|review| {
             rules
                 .iter()
@@ -204,9 +207,9 @@ pub(crate) fn render(
         target: report_target(p, scan),
         csrf,
         pending,
+        failed,
         view,
-        may_review: matches!(scan.status.as_str(), "complete" | "partial")
-            && matches!(role, "owner" | "reviewer"),
+        may_review: assessed(scan) && matches!(role, "owner" | "reviewer"),
         reasons: &REASONS,
         rules,
         coverage,
@@ -221,10 +224,11 @@ pub(crate) fn render(
         other_groups,
         changes,
         previous: history.iter().rev().find(|prior| {
-            prior.id != scan.id
+            assessed(scan)
+                && prior.id != scan.id
                 && prior.project == scan.project
                 && prior.target == scan.target
-                && !in_progress(prior)
+                && assessed(prior)
         }),
         reviews,
     }
@@ -233,6 +237,10 @@ pub(crate) fn render(
 
 fn in_progress(scan: &Scan) -> bool {
     matches!(scan.status.as_str(), "queued" | "running")
+}
+
+fn assessed(scan: &Scan) -> bool {
+    matches!(scan.status.as_str(), "complete" | "partial")
 }
 
 fn decision_label(decision: &str) -> &'static str {

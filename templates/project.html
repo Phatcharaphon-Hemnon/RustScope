@@ -11,39 +11,49 @@
   <form action="/p/{{ p.id }}/scan" method="post" class="stack">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <input type="hidden" name="request_id" value="{{ request_id }}">
+    {% if scan_form.previewed %}<input type="hidden" name="has_preview" value="on">{% endif %}
     <div class="form-fields">
-      <label>รุ่นที่ตรวจ <input name="release" required placeholder="v1.0"></label>
-      <label>สภาพแวดล้อม <select name="environment"><option value="test">ทดสอบ</option><option value="staging">เตรียมขึ้นระบบ</option><option value="production">ระบบจริง</option></select></label>
+      <label>รุ่นที่ตรวจ <input name="release" value="{{ scan_form.release }}" required placeholder="v1.0"></label>
+      <label>สภาพแวดล้อม <select name="environment"><option value="test"{% if scan_form.environment == "test" %} selected{% endif %}>ทดสอบ</option><option value="staging"{% if scan_form.environment == "staging" %} selected{% endif %}>เตรียมขึ้นระบบ</option><option value="production"{% if scan_form.environment == "production" %} selected{% endif %}>ระบบจริง</option></select></label>
     </div>
     {% if p.demo %}
-    <label>URL เป้าหมาย <input name="target" type="url" value="https://fixture.invalid/login" readonly required></label>
+    <label>URL เป้าหมาย <input name="target" type="url" value="{{ scan_form.target }}" readonly required></label>
     <label>หลักฐานสาธิต
       <select name="fixture">
-        <option value="issue">พบฟอร์มส่งผ่าน HTTP</option>
-        <option value="forbidden">หน้าเป้าหมายตอบ 403</option>
-        <option value="persistent">ยังพบฟอร์มส่งผ่าน HTTP</option>
-        <option value="fixed">ฟอร์มเดิมส่งผ่าน HTTPS</option>
+        <option value="issue"{% if scan_form.fixture == "issue" %} selected{% endif %}>พบฟอร์มส่งผ่าน HTTP</option>
+        <option value="forbidden"{% if scan_form.fixture == "forbidden" %} selected{% endif %}>หน้าเป้าหมายตอบ 403</option>
+        <option value="persistent"{% if scan_form.fixture == "persistent" %} selected{% endif %}>ยังพบฟอร์มส่งผ่าน HTTP</option>
+        <option value="fixed"{% if scan_form.fixture == "fixed" %} selected{% endif %}>ฟอร์มเดิมส่งผ่าน HTTPS</option>
       </select>
     </label>
     {% else %}
-    <label>URL เป้าหมาย <input name="target" type="url" maxlength="2048" value="{{ p.base }}" required></label>
+    <label>URL เป้าหมาย <input name="target" type="url" maxlength="2048" value="{{ scan_form.target }}" required></label>
     <p class="hint">เริ่มตรวจด้วย URL ได้เลย ส่วน Cargo.lock และนโยบายใช้เพิ่มการตรวจเฉพาะกฎ</p>
     {% endif %}
-    <details class="subpanel">
+    {% if !scan_form.previewed %}<details class="subpanel">
       <summary>กฎที่ตรวจได้และหลักฐานเพิ่ม</summary>
       {% include "scan-evidence.html" %}
-    </details>
+    </details>{% endif %}
     <details class="subpanel"><summary>ตั้งค่าขั้นสูงและแนบ Cargo.lock</summary><fieldset>
       <legend>นโยบายและหลักฐานประกอบ</legend>
-      <label class="check"><input name="download" type="checkbox"{% if p.demo %} checked{% endif %}> เป้าหมายเป็นไฟล์ดาวน์โหลด</label>
-      <label>อายุ HSTS ขั้นต่ำ (วินาที) <input name="hsts_min" type="number" min="0"{% if p.demo %} value="3600"{% endif %}></label>
-      <label>รหัสฟอร์มที่คาดว่าจะพบ (HTML id) <input name="expected_form"{% if p.demo %} value="login"{% endif %}></label>
-      <label class="check"><input name="sri" type="checkbox"{% if p.demo %} checked{% endif %}> ต้องใช้ SRI สำหรับสคริปต์ภายนอก</label>
+      <label class="check"><input name="download" type="checkbox"{% if scan_form.download %} checked{% endif %}> เป้าหมายเป็นไฟล์ดาวน์โหลด</label>
+      <label>อายุ HSTS ขั้นต่ำ (วินาที) <input name="hsts_min" type="number" min="0"{% if let Some(age) = scan_form.hsts_min %} value="{{ age }}"{% endif %}></label>
+      <label>รหัสฟอร์มที่คาดว่าจะพบ (HTML id) <input name="expected_form" value="{{ scan_form.expected_form }}"></label>
+      <label class="check"><input name="sri" type="checkbox"{% if scan_form.sri %} checked{% endif %}> ต้องใช้ SRI สำหรับสคริปต์ภายนอก</label>
       <label>เนื้อหา Cargo.lock (ไม่บังคับ สูงสุด 256 KiB) <textarea name="lock" rows="4" spellcheck="false" aria-describedby="lock-hint"></textarea></label>
       <p id="lock-hint" class="hint"><code>Cargo.lock</code> คือไฟล์ที่ Cargo บันทึกรุ่นของแพ็กเกจที่ใช้จริง ใช้เสริมการตรวจแพ็กเกจของโปรเจกต์ Rust เท่านั้น เว้นว่างได้เมื่อตรวจด้วย URL</p>
-      {% if p.demo %}<p class="hint">ถ้าเว้น Cargo.lock ว่าง ระบบใช้ไฟล์สาธิต</p>{% endif %}
+      {% if scan_form.lockfile_used %}<label class="check"><input name="discard_preview_lock" type="checkbox"> ล้างผลวิเคราะห์จาก Cargo.lock เดิม</label>{% endif %}
+      {% if p.demo %}<p class="hint">หากไม่มีไฟล์ให้ใช้ ระบบจะใช้ไฟล์สาธิต</p>{% endif %}
     </fieldset></details>
-    <div class="actions"><button>เริ่มตรวจ</button> <button name="preview" value="on">ตรวจความพร้อม</button></div>
+    {% if scan_form.lockfile_used %}<p class="hint">ระบบใช้ผลวิเคราะห์ Cargo.lock เดิมเมื่อรุ่นและสภาพแวดล้อมตรงกัน วางไฟล์ใหม่ได้ในการตั้งค่าขั้นสูง</p>{% endif %}
+    <div id="scan-actions" class="actions"><button>เริ่มตรวจ</button> <button name="preview" value="on" formaction="/p/{{ p.id }}/scan#scan-readiness">ตรวจความพร้อม</button></div>
+    {% if scan_form.previewed %}
+    <section id="scan-readiness" class="ledger" aria-labelledby="scan-readiness-title">
+      <h3 id="scan-readiness-title">ความพร้อมจากข้อมูลล่าสุด</h3>
+      {% include "scan-evidence.html" %}
+      <a href="#scan-actions">กลับไปที่ปุ่มเริ่มตรวจ</a>
+    </section>
+    {% endif %}
   </form>
   {% else %}<p class="empty-state">ต้องมีขอบเขตที่ยืนยันแล้วและยังไม่หมดอายุก่อนเริ่มรอบตรวจ</p><a href="#scope">ดูสถานะขอบเขต</a>{% endif %}
 </section>
@@ -59,6 +69,14 @@
     <dt>สถานะ</dt><dd>{% if !active %}หมดอายุ{% elif p.demo %}สาธิตออฟไลน์{% elif p.verified %}ยืนยันแล้ว{% else %}รอยืนยันการควบคุม{% endif %}</dd>
   </dl>
   {% if !verification_error.is_empty() %}<p class="form-error" role="alert">{{ verification_error }}</p>{% endif %}
+  {% if owner && !active %}
+  <p class="scope-instruction">ต่ออายุขอบเขตเดิมเพื่อเก็บประวัติและตรวจซ้ำในโปรเจกต์นี้{% if !p.demo %} แล้วยืนยันการควบคุมด้วยรหัสใหม่{% endif %}</p>
+  <form action="/p/{{ p.id }}/renew" method="post" class="stack">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>อายุขอบเขตใหม่ (วัน) <input name="days" type="number" min="1" max="30" value="7" required></label>
+    <button>ต่ออายุขอบเขต</button>
+  </form>
+  {% endif %}
   {% if !challenge_url.is_empty() %}
   <p class="scope-instruction">เผยแพร่ไฟล์ <code>rustscope-verification.txt</code> ที่ <code>{{ challenge_url }}</code></p>
   <p class="scope-instruction">ให้ไฟล์มีเฉพาะรหัส <code>{{ p.challenge }}</code> เปิด URL เพื่อตรวจว่าเห็นรหัสอย่างเดียว แล้วกดยืนยัน</p>

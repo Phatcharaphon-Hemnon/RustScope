@@ -251,6 +251,49 @@ mod tests {
     }
 
     #[test]
+    fn withdrawn_advisory_on_unchanged_lockfile_is_not_remediation() {
+        use crate::domain::{ChangeStatus, EvaluationProvenance, Round, compare};
+        let mut snapshot = Snapshot {
+            commit: "first".into(),
+            date: "2026-01-01".into(),
+            advisories: BTreeMap::from([(
+                "example".into(),
+                vec![Advisory {
+                    id: "EXAMPLE-1".into(),
+                    kind: Kind::Vulnerability,
+                    withdrawn: false,
+                    excluded: vec![],
+                }],
+            )]),
+        };
+        let input = package("example", "1.0.0", PUBLIC);
+        let before = evaluate_snapshot(Some(&input), Some(&snapshot));
+        snapshot.advisories.get_mut("example").unwrap()[0].withdrawn = true;
+        snapshot.commit = "second".into();
+        let after = evaluate_snapshot(Some(&input), Some(&snapshot));
+        assert_eq!(result(&before, VULNERABILITIES).outcome, Outcome::Finding);
+        assert_eq!(result(&after, VULNERABILITIES).outcome, Outcome::Passed);
+        let provenance = ["first", "second"].map(|id| EvaluationProvenance {
+            dependency_rules: Some("1".into()),
+            rustsec: Some(id.into()),
+            ..Default::default()
+        });
+        let rounds = [(&before, &provenance[0]), (&after, &provenance[1])].map(
+            |(observations, provenance)| Round {
+                project: "p",
+                target: "t",
+                policy: "same",
+                version: "1",
+                observations,
+                provenance,
+            },
+        );
+        let changes = compare(&rounds);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].status, ChangeStatus::AdvisoryChanged);
+    }
+
+    #[test]
     fn unsupported_and_missing_inputs_cannot_pass() {
         let lock = package("time", "0.3.46", "git+https://test.invalid/SECRET");
         let results = evaluate(Some(&lock));

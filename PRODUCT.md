@@ -22,7 +22,7 @@ RustScope turns approved web observations and release evidence into Thai securit
 
 ## Operating Context
 
-- **Live assessment.** The owner verifies control of a time-limited scope, selects one resource, and identifies the release and environment. Optional policy settings and `Cargo.lock` provide evidence for additional checks. The owner can preview readiness before starting a scan.
+- **Live assessment.** The owner verifies control of a time-limited scope, selects one resource, and identifies the release and environment. When the scope expires, the owner can renew and reverify it within the same project. Optional policy settings and `Cargo.lock` provide evidence for additional checks. Readiness appears on the same form, so the owner can submit the inputs they just reviewed.
 - **Offline demo.** Built-in fixtures walk users through a finding, a 403 that leaves it open, a persistent finding, and a verified fix. The fixtures run through the same evaluation, persistence, and comparison flow.
 - **Review and reporting.** Owners and reviewers can append a decision on an evidence-review rule. Document inputs are fingerprinted and CI records use a constrained summary. Project members can read the Thai report. The full view is designed for A4 printing.
 
@@ -35,7 +35,7 @@ RustScope turns approved web observations and release evidence into Thai securit
 ## Product Principles
 
 1. **Make each outcome traceable.** Tie results to a rule, an item, and the evidence for that release and environment.
-2. **Keep uncertainty visible.** Distinguish insufficient evidence, a rule passing, and a verified fix. Closure requires a comparable passing observation of the same item.
+2. **Keep uncertainty visible.** Distinguish insufficient evidence, a rule passing, an advisory update, and a verified fix. Closure requires a comparable passing observation of the same item.
 3. **Preserve assessment history.** Keep automated observations and append-only human decisions attributable to their original scan.
 4. **Use Thai for the workflow.** Keep standard technical identifiers such as rule IDs, HTTP status codes, `Cargo.lock`, HSTS, and SRI recognizable in forms and reports.
 

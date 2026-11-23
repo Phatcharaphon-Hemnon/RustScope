@@ -2,6 +2,7 @@ mod auth;
 mod dependencies;
 mod domain;
 mod model;
+mod preflight;
 mod scope;
 mod storage;
 mod ui;
@@ -29,6 +30,7 @@ struct App {
     store: Store,
     accounts: PathBuf,
     sessions: Sessions,
+    previews: preflight::Previews,
     hosts: [String; 2],
     wake: tokio::sync::Notify,
 }
@@ -265,6 +267,7 @@ async fn project(
         &s.csrf,
         &token(),
         "",
+        None,
     )?))
 }
 async fn owner(app: &App, s: &Session, id: &str) -> Answer<Project> {
@@ -303,7 +306,7 @@ async fn verify(
                     "เนื้อหาไฟล์ยืนยันไม่ตรงกับรหัสด้านล่าง ให้บันทึกเฉพาะรหัสเป็นข้อความ UTF-8"
                 }
                 "public IPv4 destination required" => "เว็บไซต์ต้องเข้าถึงได้ผ่านที่อยู่ IPv4 สาธารณะ",
-                "scope expired" => "ขอบเขตหมดอายุแล้ว กรุณาสร้างโปรเจกต์ใหม่เพื่อขออนุมัติขอบเขต",
+                "scope expired" => "ขอบเขตหมดอายุแล้ว ให้ต่ออายุในโปรเจกต์นี้เพื่อรับรหัสใหม่",
                 _ => "เปิด URL ไฟล์ยืนยันไม่ได้ กรุณาตรวจ URL และการตั้งค่าเว็บไซต์แล้วลองอีกครั้ง",
             };
             let html = ui::project(
@@ -313,12 +316,36 @@ async fn verify(
                 &s.csrf,
                 &token(),
                 message,
+                None,
             )?;
             return Ok((StatusCode::UNPROCESSABLE_ENTITY, Html(html)).into_response());
         }
-        app.store.verify(&s.user, &id).await?;
+        app.store
+            .verify(&s.user, &id, &p.challenge)
+            .await
+            .map_err(|_| denied())?;
     }
     Ok(Redirect::to(&format!("/p/{id}")).into_response())
+}
+
+async fn renew_scope(
+    State(app): State<Shared>,
+    Path(id): Path<String>,
+    h: HeaderMap,
+    Form(f): Form<Fields>,
+) -> Answer<Redirect> {
+    let s = mutation(&app, &h, &f)?;
+    let p = owner(&app, &s, &id).await?;
+    if p.expires > now() {
+        return Err(denied());
+    }
+    let days = field(&f, "days")
+        .parse::<i64>()
+        .ok()
+        .filter(|days| (1..=30).contains(days))
+        .ok_or_else(invalid)?;
+    app.store.renew_scope(&s.user, &id, days).await?;
+    Ok(Redirect::to(&format!("/p/{id}")))
 }
 async fn member(
     State(app): State<Shared>,
@@ -386,18 +413,42 @@ async fn scan(
     if lock.len() > 256 * 1024 {
         return Err(invalid());
     }
-    let input = if !lock.is_empty() {
-        Some(lock)
-    } else if p.demo {
-        Some(include_str!("../fixtures/demo/dependencies.lock"))
-    } else {
-        None
-    };
-    let results = dependencies::evaluate(input);
     let environment = f.get("environment").map(String::as_str).unwrap_or("test");
     if !matches!(environment, "test" | "staging" | "production") {
         return Err(invalid());
     }
+    let preview = if field(&f, "has_preview") == "on" {
+        Some(app.previews.get(&s.csrf, &id, request)?.ok_or(Error(
+            StatusCode::CONFLICT,
+            "ข้อมูลตรวจความพร้อมหมดอายุ กรุณากลับไปยังโปรเจกต์และตรวจความพร้อมอีกครั้ง",
+        ))?)
+    } else {
+        None
+    };
+    let reused = preview.filter(|draft| {
+        lock.is_empty()
+            && field(&f, "discard_preview_lock") != "on"
+            && draft.lockfile_used
+            && draft.scan.release == release
+            && draft.scan.environment == environment
+    });
+    let lockfile_used = !lock.is_empty() || reused.is_some();
+    let (results, provenance) = match reused {
+        Some(draft) => (draft.scan.results, draft.scan.provenance),
+        None => {
+            let input = if !lock.is_empty() {
+                Some(lock)
+            } else if p.demo {
+                Some(include_str!("../fixtures/demo/dependencies.lock"))
+            } else {
+                None
+            };
+            (
+                dependencies::evaluate(input),
+                domain::EvaluationProvenance::at_enqueue(),
+            )
+        }
+    };
     let scan = Scan {
         id: token(),
         project: id.clone(),
@@ -405,14 +456,30 @@ async fn scan(
         environment: environment.into(),
         target: target.into(),
         policy,
-        version: "1".into(),
+        version: domain::RULESET_VERSION.into(),
+        provenance,
         at: now(),
         observed_at: 0,
         status: "queued".into(),
         results,
     };
     if field(&f, "preview") == "on" {
-        return Ok(Html(ui::preview(&p, &scan)?).into_response());
+        let draft = preflight::Draft {
+            scan,
+            fixture: fixture.into(),
+            lockfile_used,
+        };
+        let html = ui::project(
+            &p,
+            "owner",
+            &app.store.scans(&s.user, &id).await?,
+            &s.csrf,
+            request,
+            "",
+            Some(&draft),
+        )?;
+        app.previews.remember(&s.csrf, request, draft)?;
+        return Ok(Html(html).into_response());
     }
     let actual = app
         .store
@@ -600,6 +667,7 @@ async fn main() -> anyhow::Result<()> {
         store: Store::open(&dir.join("rustscope.sqlite")).await?,
         accounts: dir,
         sessions: Sessions::default(),
+        previews: preflight::Previews::default(),
         hosts: [address.to_string(), format!("localhost:{}", address.port())],
         wake: Default::default(),
     });
@@ -612,6 +680,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/p/{id}", get(project))
         .route("/p/{id}/member", post(member))
         .route("/p/{id}/verify", post(verify))
+        .route("/p/{id}/renew", post(renew_scope))
         .route("/p/{id}/scan", post(scan))
         .route("/p/{id}/s/{sid}", get(report))
         .route("/p/{id}/s/{sid}/review", post(review))

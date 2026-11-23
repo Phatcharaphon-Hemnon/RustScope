@@ -3,7 +3,7 @@
 {% block title %}รายงาน {{ scan.release }} · RustScope{% endblock %}
 {% block refresh %}{% if pending %}<meta http-equiv="refresh" content="4">{% endif %}{% endblock %}
 {% block content %}
-<nav class="no-print audit-nav" aria-label="รายงาน"><a href="/p/{{ p.id }}">กลับไปยังโปรเจกต์</a>{% if !pending %}<a href="#results">ผลตรวจ</a><a href="#compare">ตรวจซ้ำ</a><a href="#reviews">การทบทวน</a><a href="/catalog">ทะเบียนกฎ</a>{% endif %}</nav>
+<nav class="no-print audit-nav" aria-label="รายงาน"><a href="/p/{{ p.id }}">กลับไปยังโปรเจกต์</a>{% if !pending && !failed %}<a href="#results">ผลตรวจ</a><a href="#compare">ตรวจซ้ำ</a><a href="#reviews">การทบทวน</a><a href="/catalog">ทะเบียนกฎ</a>{% endif %}</nav>
 <article class="report-shell" data-status="{{ scan.status }}">
 {% if pending %}
 <section class="panel waiting" role="status" aria-live="polite">
@@ -12,6 +12,12 @@
 <progress aria-label="กำลังประมวลผล"></progress>
 <p class="hint">ผลจะแสดงเมื่อการตรวจเสร็จ</p>
 <a href="/p/{{ p.id }}/s/{{ scan.id }}">เช็กสถานะตอนนี้</a>
+</section>
+{% else if failed %}
+<section class="panel">
+<h1>ตรวจไม่สำเร็จ</h1>
+<p>{{ p.name }} · {{ scan.release }}</p>
+<p>ระบบไม่สามารถดำเนินการตรวจรอบนี้ได้ คุณเริ่มรอบตรวจใหม่จากหน้าโปรเจกต์ได้</p>
 </section>
 {% else %}
 <header class="report-heading">
@@ -45,6 +51,10 @@
 <dt>เริ่มตรวจ</dt><dd>{{ crate::ui::utc_date(scan.at) }}</dd>
 {% if scan.observed_at > 0 %}<dt>เก็บหลักฐานเว็บ</dt><dd>{{ crate::ui::utc_date(scan.observed_at) }}</dd>{% endif %}
 <dt>รุ่นชุดกฎ</dt><dd>{{ scan.version }}</dd>
+{% if let Some(version) = scan.provenance.dependency_rules %}<dt>รุ่นตัวประเมิน Cargo.lock</dt><dd>{{ version }}</dd>{% endif %}
+{% if let Some(version) = scan.provenance.web_rules %}<dt>รุ่นตัวประเมินเว็บ</dt><dd>{{ version }}</dd>{% endif %}
+{% if let Some(hash) = scan.provenance.rustsec %}<dt>RustSec SHA-256</dt><dd><code>{{ hash }}</code></dd>{% endif %}
+{% if let Some(hash) = scan.provenance.retirejs %}<dt>Retire.js SHA-256</dt><dd><code>{{ hash }}</code></dd>{% endif %}
 <dt>ไฟล์ดาวน์โหลด</dt><dd>{% if scan.policy.download %}ใช่{% else %}ไม่ใช่{% endif %}</dd>
 <dt>HSTS ขั้นต่ำ</dt><dd>{% match scan.policy.hsts_min %}{% when Some with (age) %}{{ age }} วินาที{% when None %}ไม่กำหนด{% endmatch %}</dd>
 <dt>ฟอร์มที่คาด</dt><dd>{% if scan.policy.expected_form.is_some() %}ระบุ HTML id แล้ว{% else %}ไม่กำหนด{% endif %}</dd>
@@ -58,7 +68,7 @@
 </details>
 </details>
 {% endif %}
-{% if !pending %}
+{% if !pending && !failed %}
 <details class="report-disclosure coverage-panel"{% if view.full %} open{% endif %}>
 <summary>ความครอบคลุม · ประเมินได้ {{ assessed_total }} / {{ canonical_total }} กฎมาตรฐาน</summary>
 <table>
@@ -105,7 +115,7 @@
 {% if let Some(prior) = previous %}
 <p>รอบก่อนหน้าของเป้าหมายนี้ <a href="/p/{{ p.id }}/s/{{ prior.id }}">{{ prior.release }}</a> · รอบปัจจุบัน {{ scan.release }}</p>
 {% endif %}
-<p>การยืนยันการแก้ไขต้องมีผลผ่านของรายการเดิมในโปรเจกต์ เป้าหมาย รุ่นกฎ สภาพแวดล้อม และนโยบายที่ตรงกัน</p>
+<p>การยืนยันการแก้ไขต้องมีผลผ่านของรายการเดิมในโปรเจกต์ เป้าหมาย รุ่นกฎ สภาพแวดล้อม และนโยบายที่ตรงกัน กฎที่ใช้ข้อมูลประกาศต้องอ้างอิงชุดข้อมูลเดียวกัน</p>
 <table>
 <thead><tr><th scope="col">กฎ</th><th scope="col">รายการ</th><th scope="col">การเปลี่ยนแปลง</th></tr></thead>
 <tbody>

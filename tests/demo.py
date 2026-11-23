@@ -124,16 +124,45 @@ def run(binary, state, output=None, rounds_dir=None):
         for user, role in (("reader", "viewer"), ("auditor", "reviewer")):
             owner.request(project + "/member", dict(csrf=csrf, user=user, role=role))
         db = sqlite3.connect(state / "rustscope.sqlite")
+        live_id = live_path.rsplit('/', 1)[1]
+        old_scope = json.loads(db.execute("select data from projects where id=?", (live_id,)).fetchone()[0])
+        db.execute("update projects set data=json_set(data, '$.expires', 0, '$.verified', json('true')) where id=?",
+                   (live_id,))
+        db.commit()
+        owner.request(live_path + "/renew", dict(csrf=csrf, days=31), 400)
+        renewed_live, renewed_page = owner.request(live_path + "/renew", dict(csrf=csrf, days=7))
+        new_scope = json.loads(db.execute("select data from projects where id=?", (live_id,)).fetchone()[0])
+        assert renewed_live == live_path and new_scope["base"] == old_scope["base"]
+        assert new_scope["challenge"] != old_scope["challenge"] and not new_scope["verified"]
+        assert new_scope["challenge"] in renewed_page
+        owner.request(live_path + "/scan", dict(csrf=csrf), 403)
         reports = {}
         for fixture, change in (("issue", "New"), ("forbidden", "NotComparable"),
                                 ("persistent", "Persistent"), ("fixed", "VerifiedFixed")):
+            if fixture == "persistent":
+                db.execute("update projects set data=json_set(data, '$.expires', 0) where id=?",
+                           (project.rsplit('/', 1)[1],))
+                db.commit()
+                owner.request(project + "/scan", fields, expected=403)
+                reader.request(project + "/renew", dict(csrf=tokens["reader"], days=7), 403)
+                renewed, _ = owner.request(project + "/renew", dict(csrf=csrf, days=7))
+                assert renewed == project, "renewal changed project identity"
+                owner.request(reports["issue"])
             _, project_html = owner.request(project)
             fields = dict(csrf=csrf, release=fixture, target="https://fixture.invalid/login",
                           fixture=fixture, sri="on", download="on", hsts_min=3600,
                           expected_form="login", request_id=Page(project_html).value("request_id"))
             if fixture == "issue":
-                _, preview = owner.request(project + "/scan", dict(fields, preview="on"))
+                lock = (Path(__file__).resolve().parents[1] / "fixtures/demo/dependencies.lock").read_text()
+                lock += ('\n# PREVIEW_TEST_RAW_LOCK\n[[package]]\nname = "rustscope-preview-fixture"\n'
+                         'version = "1.0.0"\nsource = "registry+https://github.com/rust-lang/crates.io-index"\n')
+                _, preview = owner.request(project + "/scan", dict(fields, preview="on", lock=lock))
                 assert "A04-02" in preview and "A03-01" in preview
+                assert 'id="scan-readiness"' in preview
+                assert 'PREVIEW_TEST_RAW_LOCK' not in preview
+                assert Page(preview).value("release") == fixture
+                assert Page(preview).value("target") == fields["target"]
+                fields["has_preview"] = Page(preview).value("has_preview")
                 assert db.execute("select count(*) from scans").fetchone() == (0,)
             path, body = owner.request(project + "/scan", fields)
             same, _ = owner.request(project + "/scan", fields)
@@ -148,6 +177,8 @@ def run(binary, state, output=None, rounds_dir=None):
                 raise AssertionError(f"expected A04-02 {change} for {fixture}")
             assert "SIMULATED_SECRET" not in body and "@media print" in body
             assert "ส่วนขยาย" in body and "/ 60 กฎมาตรฐาน" in body
+            if fixture == "issue":
+                assert "crates.io:rustscope-preview-fixture" in body, "previewed lockfile results were lost"
             rule = None
             for tag in tags:
                 rule = tag.get("data-rule", rule)

@@ -1,6 +1,7 @@
 use crate::{
     auth::now,
     domain::Outcome,
+    model::{Project, Scan},
     scope::{HttpEvidence, Scope},
     storage::Store,
     web,
@@ -8,14 +9,14 @@ use crate::{
 use std::time::Duration;
 use tokio::sync::Notify;
 
-fn fixture_response(name: &str) -> Result<HttpEvidence, &'static str> {
+fn fixture_response(name: &str) -> Option<HttpEvidence> {
     let (status, body) = match name {
         "issue" | "persistent" => (200, include_str!("../fixtures/demo/issue.html")),
         "forbidden" => (403, ""),
         "fixed" => (200, include_str!("../fixtures/demo/fixed.html")),
-        _ => return Err("unknown fixture"),
+        _ => return None,
     };
-    Ok(HttpEvidence {
+    Some(HttpEvidence {
         final_url: "https://fixture.invalid/login".into(),
         status,
         headers: [
@@ -28,21 +29,25 @@ fn fixture_response(name: &str) -> Result<HttpEvidence, &'static str> {
     })
 }
 
-async fn run_one(store: &Store) -> anyhow::Result<bool> {
-    let Some((p, mut scan, fixture)) = store.claim().await? else {
-        return Ok(false);
+async fn evaluate(p: Project, mut scan: Scan, fixture: &str) -> Scan {
+    scan.status = "failed".into();
+    let Some(scope) = Scope::new(&p.base, p.expires)
+        .and_then(|scope| scope.with_upgrade(p.upgrade))
+        .ok()
+        .filter(|scope| p.verified && scope.contains(&scan.target))
+    else {
+        return scan;
     };
-    let response = match Scope::new(&p.base, p.expires).and_then(|s| s.with_upgrade(p.upgrade)) {
-        Ok(scope) if p.verified && scope.contains(&scan.target) => {
-            if p.demo {
-                fixture_response(&fixture)
-            } else {
-                scope.fetch(&scan.target).await
-            }
-        }
-        _ => Err("scope unavailable"),
+    let response = if p.demo {
+        let Some(response) = fixture_response(fixture) else {
+            return scan;
+        };
+        Ok(response)
+    } else {
+        scope.fetch(&scan.target).await
     };
     scan.observed_at = now();
+    scan.record_web_evaluation();
     scan.results.extend(web::evaluate(
         response.as_ref().map_err(|e| *e),
         &scan.policy,
@@ -57,16 +62,48 @@ async fn run_one(store: &Store) -> anyhow::Result<bool> {
         "complete"
     }
     .into();
-    store.finish(&scan).await?;
+    scan
+}
+
+async fn run_one(store: &Store, pending: &mut Option<Scan>) -> anyhow::Result<bool> {
+    let scan = match pending {
+        Some(scan) => scan,
+        None => {
+            let Some((project, scan, fixture)) = store.claim().await? else {
+                return Ok(false);
+            };
+            pending.insert(evaluate(project, scan, &fixture).await)
+        }
+    };
+    if !store.finish(scan).await? {
+        eprintln!("Could not save scan outcome because the scan is no longer running");
+    }
+    *pending = None;
     Ok(true)
 }
 
 pub(crate) async fn run(store: &Store, wake: &Notify) -> anyhow::Result<()> {
+    const POLL_DELAY: Duration = Duration::from_secs(5);
+    const INITIAL_BACKOFF: Duration = Duration::from_millis(250);
+    let mut backoff = INITIAL_BACKOFF;
+    let mut pending = None;
     loop {
-        if !run_one(store).await? {
-            tokio::select! {
-                _ = wake.notified() => {}
-                _ = tokio::time::sleep(Duration::from_secs(5)) => {}
+        match run_one(store, &mut pending).await {
+            Ok(progress) => {
+                backoff = INITIAL_BACKOFF;
+                if !progress {
+                    tokio::select! {
+                        _ = wake.notified() => {}
+                        _ = tokio::time::sleep(POLL_DELAY) => {}
+                    }
+                }
+            }
+            Err(_) => {
+                if backoff == INITIAL_BACKOFF {
+                    eprintln!("Scan queue storage operation failed, retrying");
+                }
+                tokio::time::sleep(backoff).await;
+                backoff = (backoff * 2).min(POLL_DELAY);
             }
         }
     }

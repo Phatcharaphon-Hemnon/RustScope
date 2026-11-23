@@ -103,7 +103,7 @@ Use 8px corners for main panels, 6px for fields and buttons, and 4px for report 
 | Forms and actions | Start from the shared labels, field styles, and button treatment in `styles/tailwind.css`. Use the filled button for submission and the outlined treatment for readiness preview. Associate hints with fields and place feedback near the relevant form. |
 | Lists and disclosures | Use lists for projects, scan history, and grouped observations. Use native `details` for optional inputs, catalog entries, and evidence reference material. |
 | Report observations | Reuse `templates/report-result.html` for one observation and `templates/report-groups.html` for grouped evidence. Keep rule ID, outcome, severity, and inspected item visible in the summary. Put observed evidence and guidance in the expanded body. |
-| Readiness | Reuse `templates/scan-evidence.html` for the evidence requirements shown in scan setup and preview. |
+| Readiness | Reuse `templates/scan-evidence.html` for evidence requirements and show their evaluated readiness on the scan form with the submit action still available. |
 
 ## Do's and Don'ts
 
