@@ -1,0 +1,215 @@
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities) source(none);
+@source "../templates/*.html";
+
+@theme {
+  --font-thai: "Noto Sans Thai", Tahoma, system-ui, sans-serif;
+  --color-canvas: #f4f6f9;
+  --color-surface: #fff;
+  --color-ink: #14243a;
+  --color-muted: #47586d;
+  --color-line: #d8e0e9;
+  --color-control: #748499;
+  --color-accent: #164ab8;
+  --color-accent-strong: #123784;
+  --color-accent-soft: #edf3ff;
+  --color-masthead: #10203b;
+  --color-focus: #245bd3;
+  --color-danger: #8d2433;
+  --color-danger-soft: #fff1f3;
+  --color-insufficient: #683c08;
+  --color-insufficient-soft: #fff1d2;
+  --color-passed: #145640;
+  --color-passed-soft: #e5f5eb;
+}
+
+@layer base {
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { @apply m-0 bg-canvas font-thai text-base leading-relaxed text-ink; }
+  ::selection { @apply bg-accent-soft text-accent-strong; }
+  a { @apply text-accent underline-offset-4 hover:text-accent-strong; }
+  :focus-visible { outline: 3px solid var(--color-focus); outline-offset: 3px; }
+  h1, h2, h3 { @apply font-bold leading-tight; }
+  h1 { @apply mt-0 mb-6 text-3xl sm:text-4xl; }
+  h2 { @apply mt-0 mb-3 text-xl; }
+  h3 { @apply mt-0 mb-2 text-lg; }
+  p { @apply my-2; }
+  input, select, textarea, button { font: inherit; }
+  input:not([type=checkbox], [type=hidden]), select, textarea {
+    @apply min-h-11 w-full min-w-0 rounded-md border border-control bg-surface px-3 py-2 font-normal text-ink;
+    caret-color: var(--color-accent);
+  }
+  input::placeholder, textarea::placeholder { @apply text-muted; }
+  input[readonly] { @apply border-line bg-canvas; }
+  input[type=checkbox] { @apply size-5 shrink-0 accent-accent; }
+  textarea { resize: vertical; }
+  button {
+    @apply min-h-11 cursor-pointer justify-self-start rounded-md border border-accent bg-accent px-4 py-2 font-semibold text-white hover:border-accent-strong hover:bg-accent-strong active:bg-masthead;
+  }
+  button:disabled { @apply cursor-default border-line bg-canvas text-muted; }
+  label { @apply grid min-w-0 gap-1 font-semibold; }
+  legend { @apply font-semibold; }
+  fieldset { @apply m-0 grid min-w-0 gap-3 rounded-md border border-line p-3; }
+  dl { @apply m-0 grid gap-x-4 gap-y-1; }
+  dt { @apply font-semibold; }
+  dd { @apply m-0 min-w-0; }
+  code { @apply rounded bg-accent-soft px-1 py-0.5 font-mono text-[0.86em]; overflow-wrap: anywhere; }
+  table { @apply mt-3 w-full border-collapse text-left; }
+  td, th { @apply border-b border-line px-2 py-2 align-top sm:px-3; overflow-wrap: anywhere; }
+  thead { @apply bg-canvas; }
+  summary { @apply cursor-pointer font-semibold; }
+  summary::marker { color: var(--color-accent); }
+  [id] { scroll-margin-top: 1rem; }
+}
+
+@layer components {
+  .wrap { width: min(100% - 2.5rem, 72rem); margin-inline: auto; }
+  .app-shell { @apply min-h-screen; }
+  .app-main { @apply pt-6 pb-12 sm:pt-8; }
+  .banner { @apply bg-masthead; }
+  .banner :focus-visible { outline-color: #b7d3ff; }
+  .brand-link { @apply inline-flex min-h-14 items-center gap-3 text-lg font-bold text-white no-underline hover:text-[#c7dcff]; }
+  .brand-link::before {
+    content: "";
+    @apply size-3.5 rounded-sm border-2 border-[#a6ceff];
+    transform: rotate(45deg);
+  }
+  .skip-link { @apply sr-only focus:not-sr-only focus:absolute focus:z-10 focus:bg-surface focus:px-4 focus:py-2; }
+  .audit-nav { @apply mb-5 flex flex-wrap gap-x-5 text-sm; }
+  .audit-nav a { @apply flex min-h-8 items-center; }
+  .subtitle { @apply mt-1 mb-0 text-muted; }
+
+  .layout, .project-layout { @apply grid min-w-0 items-start gap-6; }
+  .home-layout { @apply md:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]; }
+  .project-layout-owner { @apply md:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)]; }
+  .project-sidebar { @apply grid min-w-0 content-start gap-6; }
+  .panel, .ledger { @apply min-w-0; overflow-wrap: anywhere; }
+  .panel { @apply rounded-lg border border-line bg-surface p-4 sm:p-6; }
+  .ledger { @apply border-t border-line pt-4; }
+  .login { @apply mx-auto my-6 max-w-md sm:my-12; }
+  .login h1 { @apply text-2xl sm:text-3xl; }
+  .auth-switch { @apply mt-5 mb-0 border-t border-line pt-4 text-sm text-muted; }
+  .stack { @apply grid min-w-0 gap-4; }
+  .form-fields { @apply grid min-w-0 gap-4 sm:grid-cols-2; }
+  .hint { @apply m-0 text-sm text-muted; }
+  label + .hint { @apply -mt-2; }
+  .empty-state, .scope-instruction { @apply text-muted; }
+  .empty-state { @apply my-0 max-w-prose; }
+  .form-error { @apply m-0 rounded-md bg-danger-soft p-3 text-danger; }
+  .check { @apply flex items-start gap-2 font-medium; }
+  .record-list { @apply m-0 list-none p-0; }
+  .list-row { @apply flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 border-b border-line py-3 last:border-b-0; }
+  .list-row a { @apply font-semibold; }
+  .project-scope dl + p, .project-scope dl + .form-error { @apply mt-4; }
+  .actions { @apply flex flex-wrap gap-2; }
+  .actions button[name=preview] { @apply bg-surface text-accent hover:bg-accent-soft active:bg-canvas; }
+  .subpanel { @apply rounded-md border border-line bg-canvas px-3; }
+  .subpanel > summary { @apply py-2.5; }
+  .subpanel[open], .member-panel[open] { @apply pb-3; }
+  .member-panel[open] > summary, .catalog-panel[open] > summary { @apply mb-3; }
+  .catalog-panel { @apply mt-6; }
+  .catalog-entry { @apply border-b border-line py-2; }
+  .catalog-entry[open] { @apply pb-4; }
+  summary + dl { @apply mt-3; }
+  .preflight-table + .preflight-table { @apply mt-6; }
+  .preflight-table th:first-child { width: 34%; }
+  .preflight-table caption { @apply mb-2 text-left font-bold; }
+  .subtitle + .project-scope { @apply mt-5; }
+
+  .report-shell { @apply min-w-0; overflow-wrap: anywhere; }
+  .report-heading { @apply mb-5; }
+  .report-heading h1 { @apply mb-0; }
+  .report-overview { @apply border-y border-line bg-surface; }
+  .report-counts, .severity-counts { @apply m-0 list-none p-0; }
+  .report-counts { @apply grid grid-cols-2 sm:grid-cols-4; }
+  .report-counts li { @apply flex flex-wrap items-baseline gap-x-2 px-3 py-2.5 text-sm sm:px-4; }
+  .report-counts strong { @apply text-xl leading-tight tabular-nums; }
+  .finding-count strong { @apply text-danger; }
+  .insufficient-count strong { @apply text-insufficient; }
+  .passed-count strong { @apply text-passed; }
+  .report-severity { @apply flex flex-wrap items-baseline gap-x-4 gap-y-1 border-t border-line px-3 py-2 sm:px-4; }
+  .severity-counts { @apply flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted; }
+  .severity-counts strong { @apply tabular-nums; }
+  .report-disclosure { @apply border-b border-line py-2; }
+  .report-disclosure[open] { @apply pb-3; }
+  .report-section { @apply mt-8; }
+  .report-controls { @apply mb-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-b border-line text-sm; }
+  .report-controls a { @apply inline-flex min-h-11 items-center font-semibold; }
+  .report-filter { @apply flex flex-wrap gap-x-4; }
+  .report-filter a { @apply border-b-2 border-transparent text-muted no-underline hover:text-accent; }
+  .report-filter a[aria-current=page] { @apply border-accent text-accent-strong; }
+  .report-filter a:focus-visible { outline-offset: -3px; }
+  .result { @apply border-b border-line py-3; }
+  .result + form { @apply mt-5; }
+  .result-bucket { @apply mt-3 border-y border-line py-2; }
+  .report-reference { @apply my-2 bg-canvas px-3 py-2 text-sm; }
+  .report-reference dl { @apply text-sm; }
+  .observation-group { @apply border-b border-line pt-3; }
+  .group-observations { @apply m-0 list-none p-0; }
+  .group-observations .observation { @apply border-b-0; }
+  .group-observations li + li { @apply border-t border-line; }
+  .group-observations .observation-line > strong { @apply sr-only; }
+  .observation { @apply p-0; }
+  .observation-summary { @apply relative block py-2.5 pl-5; }
+  .observation-summary::marker { content: ""; }
+  .observation-summary::-webkit-details-marker { display: none; }
+  .observation-summary::before {
+    content: "";
+    @apply absolute left-0 top-4 size-2 border-r-2 border-b-2 border-accent;
+    transform: rotate(-45deg);
+  }
+  .observation[open] > .observation-summary::before { transform: rotate(45deg); }
+  .observation-summary:hover { @apply text-accent-strong; }
+  .observation-line { @apply flex flex-wrap items-baseline gap-x-2 gap-y-1; }
+  .observation-location { @apply min-w-0 basis-full bg-transparent p-0 font-normal text-muted; }
+  .observation > dl, .observation > .report-reference { @apply ml-5; }
+  .observation > dl { @apply mb-3; }
+  .report-badge { @apply rounded bg-accent-soft px-2 py-0.5 text-sm font-semibold text-accent-strong; }
+  .report-badge[data-severity] { @apply border border-line bg-transparent text-muted; }
+  .report-badge[data-outcome=Finding], .report-badge[data-severity=สูง] { @apply bg-danger-soft text-danger; }
+  .report-badge[data-outcome=Insufficient] { @apply bg-insufficient-soft text-insufficient; }
+  .report-badge[data-outcome=Passed] { @apply bg-passed-soft text-passed; }
+  .missing-input { @apply my-2 bg-accent-soft px-3 py-2; }
+  .review-form { @apply rounded-lg border border-line bg-surface p-4; }
+  #compare table { table-layout: fixed; }
+  #compare th:first-child { width: 5.25rem; }
+  #compare th:last-child { width: 32%; }
+  .waiting { @apply grid min-h-[35vh] place-content-center justify-items-center gap-2 text-center; }
+  .waiting h1, .waiting p { @apply m-0; }
+  .waiting progress { @apply mt-2 w-full max-w-64 accent-accent; }
+}
+
+@media (max-width: 39.999rem) {
+  dd + dt { margin-top: .45rem; }
+  #compare th:first-child { width: 4.5rem; }
+}
+
+@media (min-width: 40rem), print {
+  dl { grid-template-columns: minmax(7rem, min(27%, 13rem)) minmax(0, 1fr); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  button, .report-filter a { transition: background-color 150ms ease-out, border-color 150ms ease-out, color 150ms ease-out; }
+}
+
+@media print {
+  @page { size: A4; margin: 14mm; }
+  :root { font-size: 10.5pt; }
+  body, .app-shell { background: white; color: black; }
+  .app-shell { min-height: auto; }
+  .banner, .no-print, #catalog { display: none; }
+  .wrap { width: 100%; }
+  main.app-main { padding: 0; }
+  .panel, .report-reference { border: 0; padding: 0; background: transparent; }
+  .report-section { margin-top: 1.25rem; }
+  .report-shell details::details-content { content-visibility: visible; }
+  .scan-meta > summary, .observation-summary::before { display: none; }
+  .observation-summary { padding-left: 0; }
+  .observation > dl, .observation > .report-reference { margin-left: 0; }
+  .scan-meta dl, code { background: transparent; padding: 0; }
+  h1, h2, h3, summary { break-after: avoid; }
+  .result, tr { break-inside: avoid; }
+  thead { display: table-header-group; }
+}

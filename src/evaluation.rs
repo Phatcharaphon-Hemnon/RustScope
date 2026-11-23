@@ -1,5 +1,6 @@
 //! Held-out, labelled examples. Metrics are per target/rule, with abstentions counted separately.
 use super::*;
+use crate::scope::HttpEvidence;
 use domain::Outcome;
 use std::collections::BTreeMap;
 

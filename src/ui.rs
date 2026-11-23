@@ -1,13 +1,13 @@
+pub(crate) mod report;
+
 use crate::{
-    REASONS,
-    dependencies::{MAINTENANCE, VULNERABILITIES, is_missing_lockfile},
-    domain::{Change, Observation, Outcome, Round, Rule, catalog, compare, extensions},
-    model::{Project, Review, Scan},
+    dependencies::{MAINTENANCE, VULNERABILITIES},
+    domain::{Outcome, Rule, catalog, extensions},
+    model::{Project, Scan},
     scope::{Scope, safe_url},
     web::redacted_location,
 };
 use askama::Template;
-use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Template)]
 #[template(path = "login.html")]
@@ -126,240 +126,6 @@ pub fn project(
         request_id,
         evidence: evidence_groups(&rules, None),
         rules,
-    }
-    .render()?)
-}
-
-struct Coverage {
-    method: &'static str,
-    description: &'static str,
-    total: usize,
-    assessed: usize,
-    executed: usize,
-}
-
-#[derive(Default)]
-struct OutcomeCounts {
-    findings: usize,
-    insufficient: usize,
-    passed: usize,
-    other: usize,
-}
-
-struct ResultGroup<'a> {
-    rule: Rule,
-    observations: Vec<&'a Observation>,
-    show_guidance: bool,
-}
-
-#[derive(Default)]
-pub struct ReportView {
-    pub full: bool,
-    pub findings_only: bool,
-}
-
-#[derive(Template)]
-#[template(path = "report.html")]
-struct Report<'a> {
-    p: &'a Project,
-    scan: &'a Scan,
-    target: String,
-    csrf: &'a str,
-    pending: bool,
-    may_review: bool,
-    view: ReportView,
-    reasons: &'static [&'static str],
-    rules: Vec<Rule>,
-    coverage: Vec<Coverage>,
-    assessed_total: usize,
-    canonical_total: usize,
-    outcome_counts: OutcomeCounts,
-    severity_counts: BTreeMap<&'static str, usize>,
-    finding_groups: Vec<ResultGroup<'a>>,
-    insufficient_groups: Vec<ResultGroup<'a>>,
-    missing_lockfile_rules: Vec<&'static str>,
-    passed_groups: Vec<ResultGroup<'a>>,
-    other_groups: Vec<ResultGroup<'a>>,
-    changes: Vec<Change>,
-    previous: Option<&'a Scan>,
-    reviews: Vec<(&'a Review, Rule)>,
-}
-
-pub fn report(
-    p: &Project,
-    role: &str,
-    scan: &Scan,
-    history: &[Scan],
-    reviews: &[Review],
-    csrf: &str,
-) -> anyhow::Result<String> {
-    report_with_view(p, role, scan, history, reviews, csrf, ReportView::default())
-}
-
-pub fn report_with_view(
-    p: &Project,
-    role: &str,
-    scan: &Scan,
-    history: &[Scan],
-    reviews: &[Review],
-    csrf: &str,
-    view: ReportView,
-) -> anyhow::Result<String> {
-    let pending = in_progress(scan);
-    let mut changes = Vec::new();
-    if !pending {
-        let finished: Vec<_> = history.iter().filter(|scan| !in_progress(scan)).collect();
-        let policies = finished
-            .iter()
-            .map(|scan| serde_json::to_string(&(&scan.policy, &scan.environment)))
-            .collect::<Result<Vec<_>, _>>()?;
-        let rounds: Vec<_> = finished
-            .iter()
-            .zip(&policies)
-            .map(|(scan, policy)| Round {
-                project: &scan.project,
-                target: &scan.target,
-                policy,
-                version: &scan.version,
-                observations: &scan.results,
-            })
-            .collect();
-        changes = compare(&rounds);
-    }
-    let rules = visible_rules();
-    let observations: Vec<_> = scan
-        .results
-        .iter()
-        .filter(|_| !pending)
-        .filter_map(|obs| {
-            rules
-                .iter()
-                .find(|rule| rule.implemented && rule.id == obs.rule)
-                .map(|rule| (obs, rule.clone()))
-        })
-        .collect();
-    let reviews = reviews
-        .iter()
-        .filter(|review| review.scan == scan.id && !pending)
-        .filter_map(|review| {
-            rules
-                .iter()
-                .find(|rule| rule.method == "E" && rule.id == review.rule)
-                .map(|rule| (review, rule.clone()))
-        })
-        .collect::<Vec<_>>();
-    let coverage = [
-        ("A", "ตรวจหลักฐานโดยตรง"),
-        ("S", "วิเคราะห์ซอร์สโค้ด"),
-        ("E", "ทบทวนหลักฐานโดยคน"),
-        ("X", "ส่วนขยาย"),
-    ]
-    .into_iter()
-    .map(|(method, description)| {
-        let mut coverage = Coverage {
-            method,
-            description,
-            total: 0,
-            assessed: 0,
-            executed: 0,
-        };
-        for rule in rules.iter().filter(|rule| rule.method == method) {
-            coverage.total += 1;
-            if observations.iter().any(|(_, r)| r.id == rule.id) {
-                coverage.executed += 1;
-            }
-            if observations.iter().any(|(obs, r)| {
-                r.id == rule.id
-                    && matches!(
-                        obs.outcome,
-                        Outcome::Finding | Outcome::Review | Outcome::Passed
-                    )
-            }) || (method == "E"
-                && reviews.iter().any(|(review, r)| {
-                    r.id == rule.id
-                        && matches!(review.decision.as_str(), "Finding" | "Review" | "Passed")
-                }))
-            {
-                coverage.assessed += 1;
-            }
-        }
-        coverage
-    })
-    .collect::<Vec<_>>();
-    let canonical = coverage.iter().filter(|row| row.method != "X");
-    let assessed_total = canonical.clone().map(|row| row.assessed).sum();
-    let canonical_total = canonical.map(|row| row.total).sum();
-    let mut outcome_counts = OutcomeCounts::default();
-    let mut severity_counts = BTreeMap::new();
-    let mut groups = [const { BTreeMap::new() }; 4];
-    let mut missing_lockfile_rules = Vec::new();
-    for (obs, rule) in observations {
-        let (count, rank) = match obs.outcome {
-            Outcome::Finding => (&mut outcome_counts.findings, 0),
-            Outcome::Insufficient => (&mut outcome_counts.insufficient, 1),
-            Outcome::Passed => (&mut outcome_counts.passed, 2),
-            Outcome::Na | Outcome::Review => (&mut outcome_counts.other, 3),
-        };
-        *count += 1;
-        *severity_counts.entry(rule.severity).or_default() += 1;
-        if is_missing_lockfile(obs) {
-            missing_lockfile_rules.push(rule.id);
-            continue;
-        }
-        groups[rank]
-            .entry(rule.id)
-            .or_insert_with(|| ResultGroup {
-                rule,
-                observations: Vec::new(),
-                show_guidance: false,
-            })
-            .observations
-            .push(obs);
-    }
-    let mut guidance_shown = BTreeSet::new();
-    let [
-        finding_groups,
-        insufficient_groups,
-        passed_groups,
-        other_groups,
-    ] = groups.map(|bucket| {
-        bucket
-            .into_values()
-            .map(|mut group| {
-                group.show_guidance = guidance_shown.insert(group.rule.id);
-                group
-            })
-            .collect()
-    });
-    Ok(Report {
-        p,
-        scan,
-        target: report_target(p, scan),
-        csrf,
-        pending,
-        view,
-        may_review: matches!(scan.status.as_str(), "complete" | "partial")
-            && matches!(role, "owner" | "reviewer"),
-        reasons: &REASONS,
-        rules,
-        coverage,
-        assessed_total,
-        canonical_total,
-        outcome_counts,
-        severity_counts,
-        finding_groups,
-        insufficient_groups,
-        missing_lockfile_rules,
-        passed_groups,
-        other_groups,
-        changes,
-        previous: history.iter().rev().find(|prior| {
-            prior.id != scan.id
-                && prior.project == scan.project
-                && prior.target == scan.target
-                && !in_progress(prior)
-        }),
-        reviews,
     }
     .render()?)
 }
@@ -494,10 +260,6 @@ fn report_target(p: &Project, scan: &Scan) -> String {
     }
 }
 
-fn in_progress(scan: &Scan) -> bool {
-    matches!(scan.status.as_str(), "queued" | "running")
-}
-
 fn utc_date(seconds: &i64) -> String {
     chrono::DateTime::from_timestamp(*seconds, 0)
         .map_or_else(|| "—".into(), |date| date.to_string())
@@ -513,20 +275,10 @@ fn scan_status(status: &str) -> &'static str {
     }
 }
 
-fn decision_label(decision: &str) -> &'static str {
-    match decision {
-        "Finding" => Outcome::Finding.thai(),
-        "Review" => Outcome::Review.thai(),
-        "Passed" => Outcome::Passed.thai(),
-        "Na" => Outcome::Na.thai(),
-        _ => Outcome::Insufficient.thai(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::Policy;
+    use crate::{domain::Observation, model::Policy};
 
     fn example() -> (Project, Scan) {
         let project = Project {
@@ -578,7 +330,16 @@ mod tests {
         assert!(owner.contains("/verify"));
 
         let history = [scan.clone()];
-        let body = report(&p, "viewer", &scan, &history, &[], "csrf").unwrap();
+        let body = report::render(
+            &p,
+            "viewer",
+            &scan,
+            &history,
+            &[],
+            "csrf",
+            Default::default(),
+        )
+        .unwrap();
         assert!(!body.contains(&p.name));
         assert!(!body.contains(&scan.results[0].observed));
         assert!(!body.contains(&scan.target));
@@ -610,10 +371,10 @@ mod tests {
         .collect();
         let render = |view| {
             Html::parse_document(
-                &report_with_view(&p, "viewer", &scan, &[], &[], "csrf", view).unwrap(),
+                &report::render(&p, "viewer", &scan, &[], &[], "csrf", view).unwrap(),
             )
         };
-        let compact = render(ReportView::default());
+        let compact = render(report::ReportView::default());
         let observations = Selector::parse("#results details[data-rule]").unwrap();
         let badges = Selector::parse("[data-outcome]").unwrap();
         let outcomes: Vec<_> = compact
@@ -627,7 +388,7 @@ mod tests {
         assert_eq!(compact.select(&observations).count(), 5);
         assert_eq!(
             compact
-                .select(&Selector::parse(".group-observations tbody [data-rule]").unwrap())
+                .select(&Selector::parse(".group-observations [data-rule]").unwrap())
                 .count(),
             2
         );
@@ -650,7 +411,7 @@ mod tests {
             1
         );
 
-        let full = render(ReportView {
+        let full = render(report::ReportView {
             full: true,
             findings_only: false,
         });
@@ -659,7 +420,7 @@ mod tests {
                 .next()
                 .is_none()
         );
-        let findings = render(ReportView {
+        let findings = render(report::ReportView {
             full: false,
             findings_only: true,
         });
@@ -698,7 +459,8 @@ mod tests {
             body: include_str!("../fixtures/evaluation/javascript-vulnerable.html").into(),
         };
         scan.results = crate::web::evaluate(Ok(&response), &scan.policy);
-        let body = report(&p, "viewer", &scan, &[], &[], "csrf").unwrap();
+        let body =
+            report::render(&p, "viewer", &scan, &[], &[], "csrf", Default::default()).unwrap();
         assert!(body.contains("/ 60 กฎมาตรฐาน"));
         assert!(body.contains("ส่วนขยาย</th><td>1 / 1</td><td>1</td>"));
         assert!(body.contains("data-rule=\"X03-01\""));
@@ -732,7 +494,8 @@ mod tests {
             );
         }
 
-        let body = report(&p, "viewer", &scan, &[], &[], "csrf").unwrap();
+        let body =
+            report::render(&p, "viewer", &scan, &[], &[], "csrf", Default::default()).unwrap();
         assert_eq!(body.matches("ไม่ได้ตรวจ: ไม่มี Cargo.lock").count(), 1);
         let html = Html::parse_document(&body);
         let missing: Vec<_> = html
@@ -755,7 +518,8 @@ mod tests {
         );
 
         scan.results = crate::dependencies::evaluate(Some("invalid lockfile"));
-        let body = report(&p, "viewer", &scan, &[], &[], "csrf").unwrap();
+        let body =
+            report::render(&p, "viewer", &scan, &[], &[], "csrf", Default::default()).unwrap();
         assert!(!body.contains("ไม่ได้ตรวจ: ไม่มี Cargo.lock"));
         let html = Html::parse_document(&body);
         assert_eq!(
@@ -775,13 +539,14 @@ mod tests {
         second.environment = "staging".into();
         second.status = "queued".into();
         second.results[0].outcome = Outcome::Passed;
-        let body = report(
+        let body = report::render(
             &p,
             "owner",
             &second,
             &[first.clone(), second.clone()],
             &[],
             "csrf",
+            Default::default(),
         )
         .unwrap();
         assert!(body.contains("data-status=\"queued\""));
@@ -789,13 +554,14 @@ mod tests {
         assert!(!body.contains("/s/s2/review"));
 
         second.status = "complete".into();
-        let body = report(
+        let body = report::render(
             &p,
             "reviewer",
             &second,
             &[first, second.clone()],
             &[],
             "csrf",
+            Default::default(),
         )
         .unwrap();
         assert!(body.contains("data-change=\"NotComparable\""));

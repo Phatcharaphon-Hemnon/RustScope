@@ -6,6 +6,7 @@ mod scope;
 mod storage;
 mod ui;
 mod web;
+mod worker;
 
 use anyhow::Context;
 use auth::{Session, Sessions, label, now, token};
@@ -18,9 +19,9 @@ use axum::{
     routing::{get, post},
 };
 use model::{Policy, Project, Review, Scan};
-use scope::{HttpEvidence, Scope};
+use scope::Scope;
 use serde::Deserialize;
-use std::{collections::HashMap, fs, net::Ipv4Addr, path::PathBuf, sync::Arc, time::Duration};
+use std::{collections::HashMap, fs, net::Ipv4Addr, path::PathBuf, sync::Arc};
 use storage::Store;
 
 type Fields = HashMap<String, String>;
@@ -441,17 +442,13 @@ async fn report(
         .position(|v| v.id == sid)
         .ok_or_else(denied)?;
     let reviews = app.store.reviews(&s.user, &id, &sid).await?;
-    let view = ui::ReportView {
+    let view = ui::report::ReportView {
         full: query.view.as_deref() == Some("full"),
         findings_only: query.show.as_deref() == Some("findings"),
     };
     let scan = &history[index];
     let rounds = &history[..=index];
-    let html = if view.full || view.findings_only {
-        ui::report_with_view(&p, &role, scan, rounds, &reviews, &s.csrf, view)?
-    } else {
-        ui::report(&p, &role, scan, rounds, &reviews, &s.csrf)?
-    };
+    let html = ui::report::render(&p, &role, scan, rounds, &reviews, &s.csrf, view)?;
     Ok(Html(html))
 }
 
@@ -576,67 +573,6 @@ async fn review(
     Ok(Redirect::to(&format!("/p/{id}/s/{sid}")))
 }
 
-fn fixture_response(name: &str) -> Result<HttpEvidence, &'static str> {
-    let (status, body) = match name {
-        "issue" | "persistent" => (200, include_str!("../fixtures/demo/issue.html")),
-        "forbidden" => (403, ""),
-        "fixed" => (200, include_str!("../fixtures/demo/fixed.html")),
-        _ => return Err("unknown fixture"),
-    };
-    Ok(HttpEvidence {
-        final_url: "https://fixture.invalid/login".into(),
-        status,
-        headers: [
-            ("content-type".into(), "text/html".into()),
-            ("strict-transport-security".into(), "max-age=86400".into()),
-            ("x-content-type-options".into(), "nosniff".into()),
-        ]
-        .into(),
-        body: body.into(),
-    })
-}
-
-async fn run_one(app: &App) -> anyhow::Result<bool> {
-    let Some((p, mut scan, fixture)) = app.store.claim().await? else {
-        return Ok(false);
-    };
-    let response = match Scope::new(&p.base, p.expires).and_then(|s| s.with_upgrade(p.upgrade)) {
-        Ok(scope) if p.verified && scope.contains(&scan.target) => {
-            if p.demo {
-                fixture_response(&fixture)
-            } else {
-                scope.fetch(&scan.target).await
-            }
-        }
-        _ => Err("scope unavailable"),
-    };
-    scan.observed_at = now();
-    scan.results.extend(web::evaluate(
-        response.as_ref().map_err(|e| *e),
-        &scan.policy,
-    ));
-    scan.status = if scan
-        .results
-        .iter()
-        .any(|v| v.outcome == domain::Outcome::Insufficient)
-    {
-        "partial"
-    } else {
-        "complete"
-    }
-    .into();
-    app.store.finish(&scan).await?;
-    Ok(true)
-}
-
-async fn worker(app: &App) -> anyhow::Result<()> {
-    loop {
-        if !run_one(app).await? {
-            tokio::select! { _=app.wake.notified()=>{}, _=tokio::time::sleep(Duration::from_secs(5))=>{} }
-        }
-    }
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let dir = PathBuf::from(std::env::var_os("RUSTSCOPE_STATE").unwrap_or_else(|| "state".into()));
@@ -685,7 +621,7 @@ async fn main() -> anyhow::Result<()> {
     println!("RustScope http://{address}");
     tokio::select! {
         result=axum::serve(listener,router).into_future()=> result?,
-        result=worker(&app)=>result?,
+        result=worker::run(&app.store, &app.wake)=>result?,
     }
     Ok(())
 }

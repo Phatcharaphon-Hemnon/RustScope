@@ -8,13 +8,10 @@
 <dl>{% include "report-guidance.html" %}</dl>
 {% include "report-reference.html" %}
 {% endif %}
-<table class="group-observations">
-<thead><tr><th scope="col">รายการที่ตรวจ</th></tr></thead>
-<tbody>
+<ul class="group-observations">
 {% let show_guidance = false %}
-{% for obs in group.observations %}<tr><td>{% include "report-result.html" %}</td></tr>{% endfor %}
-</tbody>
-</table>
+{% for obs in group.observations %}<li>{% include "report-result.html" %}</li>{% endfor %}
+</ul>
 </section>
 {% else %}
 {% let show_guidance = group.show_guidance %}

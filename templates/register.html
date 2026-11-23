@@ -1,17 +1,17 @@
 {% extends "base.html" %}
 {% block title %}สมัครบัญชี · RustScope{% endblock %}
 {% block content %}
-<section class="panel login login-card">
+<section class="panel login">
 <h1>สมัครบัญชี</h1>
 {% if !error.is_empty() %}<p class="form-error" role="alert">{{ error }}</p>{% endif %}
 <form action="/register" method="post" class="stack">
-  <label>ชื่อบัญชี <input name="user" value="{{ user }}" autocomplete="username" maxlength="80" aria-describedby="register-user-hint" required autofocus></label>
+  <label>ชื่อบัญชี <input name="user" value="{{ user }}" autocomplete="username" maxlength="80" aria-describedby="register-user-hint" required></label>
   <p class="hint" id="register-user-hint">ใช้ตัวอักษร ตัวเลข ขีดกลาง ขีดล่าง หรือจุด โดยไม่ขึ้นต้นด้วยจุด</p>
   <label>รหัสผ่าน <input name="password" type="password" autocomplete="new-password" minlength="12" maxlength="256" aria-describedby="register-password-hint" required></label>
   <p class="hint" id="register-password-hint">อย่างน้อย 12 ตัวอักษร และไม่เกิน 256 ไบต์</p>
   <label>ยืนยันรหัสผ่าน <input name="confirm_password" type="password" autocomplete="new-password" minlength="12" maxlength="256" required></label>
   <button class="w-full">สร้างบัญชี</button>
 </form>
-<p>มีบัญชีแล้ว? <a href="/login">เข้าสู่ระบบ</a></p>
+<p class="auth-switch">มีบัญชีแล้ว? <a href="/login">เข้าสู่ระบบ</a></p>
 </section>
 {% endblock %}

@@ -3,7 +3,7 @@
 {% block title %}รายงาน {{ scan.release }} · RustScope{% endblock %}
 {% block refresh %}{% if pending %}<meta http-equiv="refresh" content="4">{% endif %}{% endblock %}
 {% block content %}
-<nav class="no-print audit-nav"><a href="/p/{{ p.id }}">กลับไปยังโปรเจกต์</a>{% if !pending %} · <a href="#results">ผลตรวจ</a> · <a href="#compare">ตรวจซ้ำ</a> · <a href="#reviews">การทบทวน</a> · <a href="/catalog">ทะเบียนกฎ</a>{% endif %}</nav>
+<nav class="no-print audit-nav" aria-label="รายงาน"><a href="/p/{{ p.id }}">กลับไปยังโปรเจกต์</a>{% if !pending %}<a href="#results">ผลตรวจ</a><a href="#compare">ตรวจซ้ำ</a><a href="#reviews">การทบทวน</a><a href="/catalog">ทะเบียนกฎ</a>{% endif %}</nav>
 <article class="report-shell" data-status="{{ scan.status }}">
 {% if pending %}
 <section class="panel waiting" role="status" aria-live="polite">
@@ -14,15 +14,11 @@
 <a href="/p/{{ p.id }}/s/{{ scan.id }}">เช็กสถานะตอนนี้</a>
 </section>
 {% else %}
-<h1>รายงานการตรวจประเมิน</h1>
-<p class="subtitle">{{ p.name }} · {{ scan.release }}</p>
-<nav class="no-print report-controls" aria-label="มุมมองรายงาน">
-{% if view.findings_only %}<a href="/p/{{ p.id }}/s/{{ scan.id }}{% if view.full %}?view=full{% endif %}">ทุกผลตรวจ</a>
-{% else %}<a href="?show=findings{% if view.full %}&amp;view=full{% endif %}">เฉพาะข้อที่พบ</a>{% endif %}
-{% if view.full && !view.findings_only %}<a href="/p/{{ p.id }}/s/{{ scan.id }}">ฉบับย่อ</a>
-{% else %}<a href="?view=full">ฉบับเต็มสำหรับพิมพ์</a>{% endif %}
-</nav>
-<section class="panel report-overview" aria-label="สรุปผลอัตโนมัติ">
+<header class="report-heading">
+  <h1>รายงานการตรวจประเมิน</h1>
+  <p class="subtitle">{{ p.name }} · {{ scan.release }}</p>
+</header>
+<section class="report-overview" aria-label="สรุปผลอัตโนมัติ">
 <ul class="report-counts" aria-label="จำนวนตามผลตรวจ">
 <li class="finding-count"><strong>{{ outcome_counts.findings }}</strong> พบตามกฎ</li>
 <li class="insufficient-count"><strong>{{ outcome_counts.insufficient }}</strong> ข้อมูลไม่พอ</li>
@@ -30,13 +26,15 @@
 <li><strong>{{ outcome_counts.other }}</strong> อื่น ๆ</li>
 </ul>
 {% if !severity_counts.is_empty() %}
-<p class="hint">ความรุนแรงของกฎ</p>
-<ul class="severity-counts" aria-label="จำนวนตามความรุนแรงของกฎ">
+<div class="report-severity">
+<p class="hint" id="severity-label">ความรุนแรงของกฎ</p>
+<ul class="severity-counts" aria-labelledby="severity-label">
 {% for (severity, count) in severity_counts %}<li><strong>{{ count }}</strong> {{ severity }}</li>{% endfor %}
 </ul>
+</div>
 {% endif %}
 </section>
-<details class="panel scan-meta"{% if view.full %} open{% endif %}><summary>ข้อมูลรอบตรวจ</summary><dl>
+<details class="report-disclosure scan-meta"{% if view.full %} open{% endif %}><summary>ข้อมูลรอบตรวจ</summary><dl>
 {% if p.demo %}<dt>โหมด</dt><dd>สาธิตออฟไลน์ด้วยข้อมูลจำลอง</dd>{% endif %}
 <dt>โปรเจกต์</dt><dd><code>{{ p.id }}</code></dd>
 <dt>รอบตรวจ</dt><dd><code>{{ scan.id }}</code></dd>
@@ -61,7 +59,7 @@
 </details>
 {% endif %}
 {% if !pending %}
-<details class="panel coverage-panel"{% if view.full %} open{% endif %}>
+<details class="report-disclosure coverage-panel"{% if view.full %} open{% endif %}>
 <summary>ความครอบคลุม · ประเมินได้ {{ assessed_total }} / {{ canonical_total }} กฎมาตรฐาน</summary>
 <table>
 <thead><tr><th scope="col">วิธี</th><th scope="col">กฎที่ประเมินได้ / ทั้งหมด</th><th scope="col">กฎอัตโนมัติที่มีผลบันทึก</th></tr></thead>
@@ -70,8 +68,16 @@
 {% endfor %}</tbody>
 </table>
 </details>
-<section id="results" class="panel">
+<section id="results" class="report-section">
 <h2>ผลตรวจอัตโนมัติ</h2>
+<div class="no-print report-controls">
+  <nav class="report-filter" aria-label="กรองผลตรวจ">
+    <a href="/p/{{ p.id }}/s/{{ scan.id }}{% if view.full %}?view=full{% endif %}"{% if !view.findings_only %} aria-current="page"{% endif %}>ทุกผลตรวจ</a>
+    <a href="?show=findings{% if view.full %}&amp;view=full{% endif %}"{% if view.findings_only %} aria-current="page"{% endif %}>เฉพาะข้อที่พบ</a>
+  </nav>
+  {% if view.full && !view.findings_only %}<a href="/p/{{ p.id }}/s/{{ scan.id }}">ฉบับย่อ</a>
+  {% else %}<a href="?view=full">ฉบับเต็มสำหรับพิมพ์</a>{% endif %}
+</div>
 {% if view.findings_only && finding_groups.is_empty() %}
 <p>รอบนี้ไม่มีรายการที่พบตามกฎ</p>
 {% elif finding_groups.is_empty() && insufficient_groups.is_empty() && passed_groups.is_empty() && other_groups.is_empty() && missing_lockfile_rules.is_empty() %}
@@ -94,7 +100,7 @@
 {% call results::render(other_groups, view.full) %}
 {% endif %}
 </section>
-<section id="compare" class="panel">
+<section id="compare" class="report-section">
 <h2>ผลการตรวจซ้ำ</h2>
 {% if let Some(prior) = previous %}
 <p>รอบก่อนหน้าของเป้าหมายนี้ <a href="/p/{{ p.id }}/s/{{ prior.id }}">{{ prior.release }}</a> · รอบปัจจุบัน {{ scan.release }}</p>
@@ -109,11 +115,11 @@
 </tbody>
 </table>
 </section>
-<section id="reviews" class="panel">
+<section id="reviews" class="report-section">
 <h2>คำวินิจฉัยจากผู้ทบทวน (E)</h2>
 {% for (review, rule) in reviews %}
 <section class="result">
-<h3>{{ rule.id }} {{ rule.name }} · {{ crate::ui::decision_label(review.decision.as_str()) }}</h3>
+<h3>{{ rule.id }} {{ rule.name }} · {{ crate::ui::report::decision_label(review.decision.as_str()) }}</h3>
 <dl>
 <dt>หมวด OWASP / รุ่นกฎ</dt><dd>{{ rule.category }} / {{ rule.version }}</dd>
 <dt>รุ่นที่ตรวจ</dt><dd>{{ scan.release }}</dd>

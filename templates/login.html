@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 {% block title %}เข้าสู่ระบบ · RustScope{% endblock %}
 {% block content %}
-<section class="panel login login-card">
+<section class="panel login">
 <h1>เข้าสู่ระบบ</h1>
 <form action="/login" method="post" class="stack">
-  <label>บัญชีผู้ใช้ <input name="user" autocomplete="username" required autofocus></label>
+  <label>ชื่อบัญชี <input name="user" autocomplete="username" required></label>
   <label>รหัสผ่าน <input name="password" type="password" autocomplete="current-password" required></label>
   <button class="w-full">เข้าสู่ระบบ</button>
 </form>
-<p>ยังไม่มีบัญชี? <a href="/register">สมัครบัญชี</a></p>
+<p class="auth-switch">ยังไม่มีบัญชี? <a href="/register">สมัครบัญชี</a></p>
 </section>
 {% endblock %}

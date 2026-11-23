@@ -2,6 +2,8 @@
 
 RustScope assesses owner-approved web resources and release evidence, produces Thai reports, and compares rescans. It uses Rust, Axum, Tokio, reqwest, scraper, Askama and SQLx/SQLite. All eight automated checks run inside the application. The offline demo requires no target website, advisory service or ZAP installation.
 
+[Product context](PRODUCT.md) covers users and workflows. [Design system](DESIGN.md) documents the current interface and its shared styles.
+
 ## Start from a clean checkout
 
 Use Linux, a current stable Rust toolchain with Cargo, a C toolchain, and Python 3 for the demo. The verified build used rustc 1.99.1. The first build needs access to crates.io. After fetching the locked dependencies, builds and tests can run with Cargo’s `--offline` flag.
@@ -18,10 +20,10 @@ Set `RUSTSCOPE_STATE` to select the private state directory (default `./state`) 
 
 ## Update the interface styles
 
-Edit the Askama files in `templates/` or the Tailwind rules in `frontend/tailwind.css`. Install the [Tailwind CSS v4.1.18 standalone CLI](https://github.com/tailwindlabs/tailwindcss/releases/tag/v4.1.18) for your platform and make it available as `tailwindcss`. From the repository root, regenerate the checked-in stylesheet and rebuild the app.
+Edit the Askama files in `templates/` or the Tailwind rules in `styles/tailwind.css`. Install the [Tailwind CSS v4.1.18 standalone CLI](https://github.com/tailwindlabs/tailwindcss/releases/tag/v4.1.18) for your platform and make it available as `tailwindcss`. From the repository root, regenerate the checked-in stylesheet and rebuild the app.
 
 ```sh
-tailwindcss -i frontend/tailwind.css -o templates/style.css --minify
+tailwindcss -i styles/tailwind.css -o templates/style.css --minify
 cargo build --locked
 ```
 

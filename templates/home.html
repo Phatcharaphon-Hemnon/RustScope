@@ -3,11 +3,17 @@
 {% block content %}
 <h1 class="dashboard-heading">โปรเจกต์ของคุณ</h1>
 <div class="layout home-layout">
-  <section class="panel">
+  <section class="ledger">
     <h2>รายการโปรเจกต์</h2>
+    {% if projects.is_empty() %}
+    <p class="empty-state">สร้างโปรเจกต์สาธิตเพื่อดูตัวอย่างรายงาน หรือเพิ่มเว็บไซต์ที่คุณได้รับอนุญาตให้ตรวจ</p>
+    {% else %}
+    <ul class="record-list">
     {% for p in projects %}
-    <p class="list-row"><a href="/p/{{ p.id }}">{{ p.name }}</a> · {% if p.demo %}สาธิตออฟไลน์{% elif p.verified %}ยืนยันขอบเขตแล้ว{% else %}รอยืนยันขอบเขต{% endif %}</p>
-    {% else %}<p class="hint">ยังไม่มีโปรเจกต์ที่คุณเข้าถึงได้</p>{% endfor %}
+    <li class="list-row"><a href="/p/{{ p.id }}">{{ p.name }}</a><span class="hint">{% if p.demo %}สาธิตออฟไลน์{% elif p.verified %}ยืนยันขอบเขตแล้ว{% else %}รอยืนยันขอบเขต{% endif %}</span></li>
+    {% endfor %}
+    </ul>
+    {% endif %}
   </section>
   <section class="panel">
     <h2>สร้างโปรเจกต์</h2>
@@ -23,7 +29,7 @@
         </select>
       </label>
       <label>URL ขอบเขตสำหรับโหมดเว็บไซต์ <input name="base" value="{{ form.base }}" type="url" maxlength="2048" placeholder="https://example.org/app" aria-describedby="scope-hint"></label>
-      <p id="scope-hint" class="hint">โหมดเว็บไซต์ต้องกรอก URL ของเส้นทางที่ได้รับอนุญาตให้ตรวจ</p>
+      <p id="scope-hint" class="hint">กรอก URL ของเส้นทางที่ได้รับอนุญาตให้ตรวจ หากเลือกโหมดเว็บไซต์</p>
       <label class="check"><input name="upgrade" type="checkbox" value="on"{% if form.upgrade %} checked{% endif %}> เพิ่ม HTTPS ให้ขอบเขตที่เริ่มด้วย http:// พอร์ต 80</label>
       <label>อายุของขอบเขต (วัน) <input name="days" type="number" value="{{ form.days }}" min="1" max="30" required></label>
       <button>สร้างโปรเจกต์</button>

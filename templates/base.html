@@ -8,7 +8,8 @@
 <style>{% include "style.css" %}</style>
 </head>
 <body class="app-shell">
+<a class="skip-link no-print" href="#main">ข้ามไปยังเนื้อหา</a>
 <header class="banner"><div class="wrap"><a class="brand-link" href="/">RustScope</a></div></header>
-<main class="wrap app-main">{% block content %}{% endblock %}</main>
+<main id="main" class="wrap app-main" tabindex="-1">{% block content %}{% endblock %}</main>
 </body>
 </html>
