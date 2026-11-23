@@ -1,4 +1,7 @@
-<a href="/">Projects</a>
+<nav class="global-nav" aria-label="Main navigation">
+  <a href="/">Projects</a>
+  <a href="/catalog">Rule catalog</a>
+</nav>
 <div class="account"><span>{{ session.user }}</span>
 <form method="post" action="/logout"><input type="hidden" name="csrf" value="{{ session.csrf }}"><button class="text-button">Sign out</button></form>
 </div>

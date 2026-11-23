@@ -452,7 +452,7 @@ impl<F: FnMut(&str, &str, Outcome, &str)> Document<'_, F> {
         let https = self.url.scheme() == "https";
         let mut mixed = false;
         let mut sri = false;
-        let mut library = false;
+        let mut libraries = javascript::Scripts::default();
         let document = resource_key(self.url);
         for script in self.html.select(&selector("script[src]")) {
             let Some(src) = script
@@ -484,7 +484,7 @@ impl<F: FnMut(&str, &str, Outcome, &str)> Document<'_, F> {
                 .expect("serialize script identity");
             let item = identity("script", &key);
             let location = redacted_location(&url);
-            library |= javascript::evaluate(&url, &item, &location, &mut self.push);
+            libraries.inspect(&url, &document, &item, &location);
             if https {
                 mixed = true;
                 let outcome = if url.scheme() == "http" {
@@ -517,14 +517,7 @@ impl<F: FnMut(&str, &str, Outcome, &str)> Document<'_, F> {
                 );
             }
         }
-        if !library {
-            (self.push)(
-                javascript::RULE,
-                "document",
-                Insufficient,
-                "No library with an identifiable version was found in HTML script filenames or URLs",
-            );
-        }
+        libraries.report(&mut self.push);
         if !mixed {
             let observed = if https {
                 "No HTTP(S) script sources were found in the HTML"
@@ -888,5 +881,77 @@ mod tests {
             for_rule(&evaluate(Err("timeout"), &policy()), javascript::RULE),
             [Insufficient]
         );
+    }
+
+    #[test]
+    fn javascript_compares_unique_version_updates_and_preserves_ambiguous_findings() {
+        use crate::domain::{ChangeStatus, EvaluationProvenance, Round, compare};
+        let observations = |urls: &[&str]| {
+            let body = urls
+                .iter()
+                .map(|url| format!(r#"<script src="{url}"></script>"#))
+                .collect::<String>();
+            evaluate(Ok(&evidence("https://site.test/doc", &body)), &policy())
+                .into_iter()
+                .filter(|obs| obs.rule == javascript::RULE)
+                .collect::<Vec<_>>()
+        };
+        let mut provenance = EvaluationProvenance::default();
+        provenance.record_web_evaluation();
+        let changes = |before: &[Observation], after: &[Observation]| {
+            compare(&[before, after].map(|observations| Round {
+                project: "p",
+                target: "doc",
+                policy: "same",
+                version: "2",
+                provenance: &provenance,
+                observations,
+            }))
+        };
+        for (old, fixed) in [
+            (
+                "/tenant/3.4.1/jquery-3.4.1.min.js",
+                "/tenant/3.4.1/jquery-3.7.1.min.js",
+            ),
+            (
+                "//cdn.test/jquery/3.4.1/jquery.min.js?cache=same",
+                "//cdn.test/jquery/3.7.1/jquery.min.js?cache=same",
+            ),
+        ] {
+            let before = observations(&[old]);
+            let after = observations(&[fixed]);
+            assert_eq!(before[0].item, after[0].item);
+            assert_eq!(
+                changes(&before, &after)[0].status,
+                ChangeStatus::VerifiedFixed
+            );
+            let duplicate = observations(&[fixed, fixed]);
+            assert_eq!(duplicate[0].outcome, Insufficient);
+            assert_eq!(
+                changes(&before, &duplicate)[0].status,
+                ChangeStatus::NotComparable
+            );
+            let mixed = observations(&[old, fixed]);
+            assert!(mixed.iter().any(|obs| obs.outcome == Finding));
+            assert!(mixed.iter().all(|obs| obs.item.starts_with("ambiguous/")));
+            assert!(
+                changes(&mixed, &after)
+                    .iter()
+                    .all(|c| c.status == ChangeStatus::NotComparable)
+            );
+        }
+        let before = observations(&["//cdn.test/tenant/3.4.1/jquery-3.4.1.min.js?key=a"]);
+        for different in [
+            "//other.test/tenant/3.4.1/jquery-3.7.1.min.js?key=a",
+            "//cdn.test/tenant/3.7.1/jquery-3.7.1.min.js?key=a",
+            "//cdn.test/tenant/3.4.1/jquery-3.7.1.min.js?key=b",
+        ] {
+            let after = observations(&[different]);
+            assert_ne!(before[0].item, after[0].item);
+            assert_eq!(
+                changes(&before, &after)[0].status,
+                ChangeStatus::NotComparable
+            );
+        }
     }
 }

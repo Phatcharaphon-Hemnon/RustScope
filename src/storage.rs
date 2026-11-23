@@ -1,7 +1,7 @@
 mod sealed;
 
 use crate::domain::catalog;
-use crate::model::{Project, Review, Scan};
+use crate::model::{Policy, Project, Review, Scan};
 use anyhow::{Result, anyhow, ensure};
 use ring::aead::LessSafeKey;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
@@ -78,13 +78,13 @@ impl Store {
             .await
     }
 
-    pub async fn verify(&self, user: &str, id: &str) -> Result<()> {
+    pub async fn verify(&self, user: &str, id: &str, challenge: &str) -> Result<()> {
         let mut tx = self.0.begin().await?;
         let (project, role) = self.project_access(&mut tx, user, id).await?;
         ensure!(role == "owner", "forbidden");
         ensure!(
-            project.expires > now(&mut tx).await?,
-            "scope is not verified or has expired"
+            project.expires > now(&mut tx).await? && project.challenge == challenge,
+            "scope challenge changed or expired"
         );
         sqlx::query(
             "UPDATE projects SET data = json_set(data, '$.verified', json('true')) WHERE id = ?",
@@ -93,6 +93,33 @@ impl Store {
         .execute(&mut *tx)
         .await?;
         audit(&mut tx, user, id, "scope_verified", id).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn renew_scope(&self, user: &str, id: &str, days: i64) -> Result<()> {
+        ensure!((1..=30).contains(&days), "invalid scope duration");
+        let mut tx = self.0.begin().await?;
+        let (project, role) = self.project_access(&mut tx, user, id).await?;
+        ensure!(role == "owner", "forbidden");
+        let at = now(&mut tx).await?;
+        ensure!(project.expires <= at, "scope is still active");
+        sqlx::query(
+            "UPDATE projects SET data = json_set(data, '$.challenge', ?, '$.expires', ?,
+                                                  '$.verified', json(?)) WHERE id = ?",
+        )
+        .bind(crate::auth::token())
+        .bind(at + days * 86400)
+        .bind(if project.demo { "true" } else { "false" })
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+        let action = if project.demo {
+            "scope_renewed"
+        } else {
+            "scope_renewal_requested"
+        };
+        audit(&mut tx, user, id, action, id).await?;
         tx.commit().await?;
         Ok(())
     }
@@ -120,16 +147,44 @@ impl Store {
     pub async fn scans(&self, user: &str, id: &str) -> Result<Vec<Scan>> {
         let mut tx = self.0.begin().await?;
         self.project_access(&mut tx, user, id).await?;
-        let rows = sqlx::query_as::<_, (String, String, String)>(
-            "SELECT id, data, status FROM scans WHERE project = ? ORDER BY rowid",
+        let rows = sqlx::query_as::<_, (String, Vec<u8>, String)>(
+            "SELECT id, CAST(data AS BLOB), status FROM scans WHERE project = ? ORDER BY rowid",
         )
         .bind(id)
         .fetch_all(&mut *tx)
         .await?;
         tx.commit().await?;
-        rows.into_iter()
-            .map(|(scan_id, data, status)| self.decode_scan(&scan_id, &data, status))
-            .collect()
+        Ok(rows
+            .into_iter()
+            .map(|(scan_id, data, status)| {
+                let mut scan = self
+                    .decode_scan(&scan_id, id, &data, status)
+                    .unwrap_or_else(|_| Scan {
+                        id: scan_id,
+                        project: id.to_owned(),
+                        release: "Unknown release".into(),
+                        environment: String::new(),
+                        target: String::new(),
+                        policy: Policy {
+                            download: false,
+                            hsts_min: None,
+                            sri: false,
+                            expected_form: None,
+                        },
+                        version: String::new(),
+                        provenance: Default::default(),
+                        at: 0,
+                        observed_at: 0,
+                        status: "failed".into(),
+                        results: vec![],
+                    });
+                if scan.status == "failed" {
+                    scan.target.clear();
+                    scan.results.clear();
+                }
+                scan
+            })
+            .collect())
     }
 
     pub async fn reviews(&self, user: &str, id: &str, scan: &str) -> Result<Vec<Review>> {
@@ -233,41 +288,66 @@ impl Store {
     }
 
     pub(crate) async fn claim(&self) -> Result<Option<(Project, Scan, String)>> {
-        let mut tx = self.0.begin().await?;
-        let row = sqlx::query_as::<_, (String, String, String, String, String)>(
-            "UPDATE scans SET status = 'running'
-             WHERE rowid = (SELECT rowid FROM scans WHERE status = 'queued' ORDER BY rowid LIMIT 1)
-             RETURNING id, project, data, fixture, (SELECT p.data FROM projects p WHERE p.id = scans.project)",
-        )
-        .fetch_optional(&mut *tx)
-        .await?;
-        let Some((scan_id, project_id, scan, fixture, project)) = row else {
-            return Ok(None);
-        };
-        let project = self.decode_project(&project_id, &project)?;
-        let scan = self.decode_scan(&scan_id, &scan, "running".to_owned())?;
-        tx.commit().await?;
-        Ok(Some((project, scan, fixture)))
+        loop {
+            let mut tx = self.0.begin().await?;
+            let row = sqlx::query_as::<_, (String, String, Vec<u8>, Vec<u8>, Option<Vec<u8>>)>(
+                "UPDATE scans SET status = 'running'
+                 WHERE rowid = (SELECT rowid FROM scans WHERE status = 'queued' ORDER BY rowid LIMIT 1)
+                 RETURNING id, project, CAST(data AS BLOB), CAST(fixture AS BLOB),
+                    (SELECT CAST(p.data AS BLOB) FROM projects p WHERE p.id = scans.project)",
+            )
+            .fetch_optional(&mut *tx)
+            .await?;
+            let Some((scan_id, project_id, scan, fixture, project)) = row else {
+                return Ok(None);
+            };
+            let decoded = (|| -> Result<_> {
+                let data = project
+                    .as_deref()
+                    .ok_or_else(|| anyhow!("project not found"))?;
+                let project = self.decode_project(&project_id, std::str::from_utf8(data)?)?;
+                ensure!(project.id == project_id, "invalid project identity");
+                let scan = self.decode_scan(&scan_id, &project_id, &scan, "running".to_owned())?;
+                Ok((project, scan, String::from_utf8(fixture)?))
+            })();
+            if let Ok(job) = decoded {
+                tx.commit().await?;
+                return Ok(Some(job));
+            }
+            mark_failed(&mut tx, &project_id, &scan_id).await?;
+            tx.commit().await?;
+        }
     }
 
-    pub(crate) async fn finish(&self, scan: &Scan) -> Result<()> {
+    pub(crate) async fn finish(&self, scan: &Scan) -> Result<bool> {
         ensure!(
-            matches!(scan.status.as_str(), "complete" | "partial"),
+            matches!(scan.status.as_str(), "complete" | "partial" | "failed"),
             "invalid terminal scan status"
         );
-        let result = sqlx::query(
-            "UPDATE scans SET status = ?, data = json_set(data, '$.results', json(?), '$.observed_at', ?)
-             WHERE id = ? AND project = ? AND status = 'running'",
-        )
-        .bind(&scan.status)
-        .bind(serde_json::to_string(&scan.results)?)
-        .bind(scan.observed_at)
-        .bind(&scan.id)
-        .bind(&scan.project)
-        .execute(&self.0)
-        .await?;
-        ensure!(result.rows_affected() == 1, "scan is not running");
-        Ok(())
+        let mut tx = self.0.begin().await?;
+        if scan.status != "failed" {
+            let result = sqlx::query(
+                "UPDATE scans SET status = ?, data = json_set(data, '$.results', json(?),
+                    '$.observed_at', ?, '$.version', ?, '$.provenance', json(?))
+                 WHERE id = ? AND project = ? AND status = 'running' AND json_valid(data)",
+            )
+            .bind(&scan.status)
+            .bind(serde_json::to_string(&scan.results)?)
+            .bind(scan.observed_at)
+            .bind(&scan.version)
+            .bind(serde_json::to_string(&scan.provenance)?)
+            .bind(&scan.id)
+            .bind(&scan.project)
+            .execute(&mut *tx)
+            .await?;
+            if result.rows_affected() == 1 {
+                tx.commit().await?;
+                return Ok(true);
+            }
+        }
+        let failed = mark_failed(&mut tx, &scan.project, &scan.id).await?;
+        tx.commit().await?;
+        Ok(failed)
     }
 
     async fn project_access(
@@ -288,8 +368,12 @@ impl Store {
         Ok((self.decode_project(id, &data)?, role))
     }
 
-    fn decode_scan(&self, id: &str, data: &str, status: String) -> Result<Scan> {
-        let mut scan: Scan = serde_json::from_str(data)?;
+    fn decode_scan(&self, id: &str, project: &str, data: &[u8], status: String) -> Result<Scan> {
+        let mut scan: Scan = serde_json::from_slice(data)?;
+        ensure!(
+            scan.id == id && scan.project == project,
+            "invalid scan identity"
+        );
         scan.target = sealed::open(&self.1, "scan.target", id, &scan.target)?;
         scan.status = status;
         Ok(scan)
@@ -300,6 +384,22 @@ impl Store {
         project.base = sealed::open(&self.1, "project.base", id, &project.base)?;
         Ok(project)
     }
+}
+
+async fn mark_failed(conn: &mut SqliteConnection, project: &str, scan: &str) -> Result<bool> {
+    let updated = sqlx::query(
+        "UPDATE scans SET status = 'failed' WHERE project = ? AND id = ? AND status = 'running'",
+    )
+    .bind(project)
+    .bind(scan)
+    .execute(&mut *conn)
+    .await?
+    .rows_affected()
+        == 1;
+    if updated {
+        audit(conn, "worker", project, "scan_failed", scan).await?;
+    }
+    Ok(updated)
 }
 
 async fn scan_exists(conn: &mut SqliteConnection, project: &str, scan: &str) -> Result<bool> {
@@ -339,7 +439,94 @@ async fn audit(
 mod tests {
     use super::*;
     use crate::domain::{Observation, Outcome};
-    use crate::model::Policy;
+
+    #[tokio::test]
+    async fn unreadable_queue_rows_do_not_block_claims_or_history() -> Result<()> {
+        let path = std::env::temp_dir().join(format!("rustscope-{}.sqlite", uuid::Uuid::new_v4()));
+        let result = exercise_unreadable_queue_rows(&path).await;
+        std::fs::remove_file(&path)?;
+        std::fs::remove_file(sealed::key_path(&path))?;
+        result
+    }
+
+    async fn exercise_unreadable_queue_rows(path: &Path) -> Result<()> {
+        let store = Store::open(path).await?;
+        let project = Project {
+            id: "project".into(),
+            name: "Project".into(),
+            base: "https://fixture.invalid/".into(),
+            expires: i64::MAX,
+            challenge: "fixture-challenge".into(),
+            verified: true,
+            demo: true,
+            upgrade: false,
+        };
+        store.create("owner", &project).await?;
+        let mut scan = Scan {
+            id: String::new(),
+            project: project.id.clone(),
+            release: "v1.0".into(),
+            environment: "test".into(),
+            target: "https://fixture.invalid/private".into(),
+            policy: Policy {
+                download: false,
+                hsts_min: None,
+                sri: false,
+                expected_form: None,
+            },
+            version: "1".into(),
+            provenance: Default::default(),
+            at: 1,
+            observed_at: 0,
+            status: "queued".into(),
+            results: vec![],
+        };
+        for id in ["broken", "encrypted", "valid"] {
+            scan.id = id.into();
+            store
+                .enqueue("owner", &project.id, &scan, "fixed", id)
+                .await?;
+        }
+        sqlx::query("UPDATE scans SET data = X'FF' WHERE id = 'broken'")
+            .execute(&store.0)
+            .await?;
+        sqlx::query(
+            "UPDATE scans SET data = json_set(data, '$.target', 'private') WHERE id = 'encrypted'",
+        )
+        .execute(&store.0)
+        .await?;
+
+        let (_, mut job, _) = store.claim().await?.expect("next valid job");
+        assert_eq!(job.id, "valid");
+        job.status = "complete".into();
+        job.record_web_evaluation();
+        assert!(store.finish(&job).await?);
+        assert!(store.claim().await?.is_none());
+        store.0.close().await;
+
+        let store = Store::open(path).await?;
+        let history = store.scans("owner", &project.id).await?;
+        assert_eq!(history.len(), 3);
+        for (scan, id) in history[..2].iter().zip(["broken", "encrypted"]) {
+            assert_eq!(scan.id, id);
+            assert_eq!(scan.project, project.id);
+            assert_eq!(scan.status, "failed");
+            assert!(scan.results.is_empty() && scan.target.is_empty());
+            assert!(store.reviews("owner", &project.id, id).await?.is_empty());
+        }
+        assert_eq!(history[2].status, "complete");
+        assert_eq!(history[2].version, job.version);
+        assert_eq!(history[2].provenance, job.provenance);
+        assert!(store.claim().await?.is_none());
+        let failures = sqlx::query_scalar::<_, String>(
+            "SELECT subject FROM audit WHERE project = 'project' AND action = 'scan_failed' ORDER BY id",
+        )
+        .fetch_all(&store.0)
+        .await?;
+        assert_eq!(failures, ["broken", "encrypted"]);
+        store.0.close().await;
+        Ok(())
+    }
 
     #[tokio::test]
     async fn queue_recovery_and_scoped_append_only_reviews() -> Result<()> {
@@ -377,7 +564,31 @@ mod tests {
         store.member("owner", "first", "viewer", "viewer").await?;
         assert_eq!(store.projects("viewer").await?.len(), 1);
         assert!(store.scans("viewer", "second").await.is_err());
-        assert!(store.verify("reviewer", "first").await.is_err());
+        sqlx::query(
+            "UPDATE projects SET data = json_set(data, '$.expires', 0) WHERE id = 'second'",
+        )
+        .execute(&store.0)
+        .await?;
+        store.renew_scope("reviewer", "second", 7).await?;
+        let (renewed, _) = store.access("reviewer", "second").await?;
+        assert_eq!(renewed.base, other.base);
+        assert!(!renewed.verified);
+        assert!(
+            store
+                .verify("reviewer", "second", &other.challenge)
+                .await
+                .is_err()
+        );
+        store
+            .verify("reviewer", "second", &renewed.challenge)
+            .await?;
+        assert!(store.access("reviewer", "second").await?.0.verified);
+        assert!(
+            store
+                .verify("reviewer", "first", &project.challenge)
+                .await
+                .is_err()
+        );
         assert!(
             store
                 .member("viewer", "first", "new", "reviewer")
@@ -403,6 +614,7 @@ mod tests {
                 expected_form: None,
             },
             version: "1".into(),
+            provenance: Default::default(),
             at: 1,
             observed_at: 0,
             status: "queued".into(),
@@ -414,7 +626,7 @@ mod tests {
                 .await
                 .is_err()
         );
-        store.verify("owner", "first").await?;
+        store.verify("owner", "first", &project.challenge).await?;
         assert!(
             store
                 .enqueue("reviewer", "first", &scan, "fixture", "retry")
@@ -449,8 +661,8 @@ mod tests {
         assert_eq!(fixture, "fixture");
         assert_eq!(job.results, vec![observation.clone()]);
         job.status = "partial".into();
-        store.finish(&job).await?;
-        assert!(store.finish(&job).await.is_err());
+        assert!(store.finish(&job).await?);
+        assert!(!store.finish(&job).await?);
 
         let mut review = Review {
             scan: id.clone(),

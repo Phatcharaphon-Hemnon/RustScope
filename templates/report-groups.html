@@ -12,4 +12,9 @@
 </table>
 <dl>{% include "report-guidance.html" %}</dl>
 {% let full = view.full %}{% include "report-reference.html" %}</details>
-{% else %}<p>{% if view.findings_only %}This scan recorded no findings{% else %}This scan recorded no automated results{% endif %}</p>{% endfor %}
+{% else %}{% if missing_lockfile_rules.is_empty() %}<p>{% if view.findings_only %}This scan recorded no findings{% else %}This scan recorded no automated results{% endif %}</p>{% endif %}{% endfor %}
+{% if !missing_lockfile_rules.is_empty() %}
+<p class="missing-input">Cargo.lock was not supplied
+  <span class="hint">({% for (index, rule) in missing_lockfile_rules %}{% if !loop.first %}, {% endif %}<span id="item-{{ index }}" data-rule="{{ rule }}" data-outcome="Insufficient">{{ rule }}</span>{% endfor %})</span>
+</p>
+{% endif %}

@@ -1,11 +1,14 @@
 //! Scope validation and bounded, read-only collection of owner-selected resources.
-use reqwest::{Client, Url, redirect::Policy};
+use reqwest::{Client, Response, Url, redirect::Policy};
 use std::{
     collections::BTreeMap,
     net::{IpAddr, Ipv4Addr},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use tokio::{net::lookup_host, time::timeout};
+use tokio::{
+    net::lookup_host,
+    time::{Instant, timeout_at},
+};
 
 const MAX_BODY: usize = 512 * 1024;
 const MAX_TIME: Duration = Duration::from_secs(12);
@@ -74,6 +77,21 @@ fn public_v4(ip: Ipv4Addr) -> bool {
             | (198, 51, 100)
             | (203, 0, 113)
     )
+}
+
+async fn read_body(
+    response: &mut Response,
+    limit: usize,
+    size_error: Error,
+) -> Result<String, Error> {
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|_| "incomplete response")? {
+        if chunk.len() > limit - bytes.len() {
+            return Err(size_error);
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    String::from_utf8(bytes).map_err(|_| "unsupported text encoding")
 }
 
 impl Scope {
@@ -187,7 +205,8 @@ impl Scope {
 
     async fn collect(&self, resource: &str, redirects: bool) -> Result<HttpEvidence, Error> {
         let mut url = parse_resource(resource)?;
-        timeout(MAX_TIME, async {
+        let deadline = Instant::now() + MAX_TIME;
+        let (url, mut response) = timeout_at(deadline, async {
             for _ in 0..4 {
                 self.active()?;
                 if !self.allows(&url) {
@@ -213,7 +232,7 @@ impl Scope {
                     .timeout(MAX_TIME)
                     .build()
                     .map_err(|_| "client unavailable")?;
-                let mut response = client
+                let response = client
                     .get(url.clone())
                     .send()
                     .await
@@ -239,57 +258,58 @@ impl Scope {
                     url = self.redirect_target(&url, location)?;
                     continue;
                 }
-                let mut headers = BTreeMap::new();
-                for name in [
-                    "content-type",
-                    "strict-transport-security",
-                    "x-content-type-options",
-                ] {
-                    let values: Vec<_> = response
-                        .headers()
-                        .get_all(name)
-                        .iter()
-                        .map(|v| v.to_str().unwrap_or("invalid"))
-                        .collect();
-                    if !values.is_empty() {
-                        headers.insert(name.to_owned(), values.join(","));
-                    }
-                }
-                let limit = if redirects { MAX_BODY } else { 256 };
-                let mut bytes = Vec::new();
-                while let Some(chunk) = response.chunk().await.map_err(|_| "incomplete response")? {
-                    if chunk.len() > limit - bytes.len() {
-                        return Err(if redirects {
-                            "response too large"
-                        } else {
-                            "verification response too large"
-                        });
-                    }
-                    bytes.extend_from_slice(&chunk);
-                }
-                self.active()?;
-                let html = headers.get("content-type").is_some_and(|value| {
-                    value
-                        .split(';')
-                        .next()
-                        .is_some_and(|mime| mime.trim().eq_ignore_ascii_case("text/html"))
-                });
-                let body = if html || !redirects {
-                    String::from_utf8(bytes).map_err(|_| "unsupported text encoding")?
-                } else {
-                    String::new()
-                };
-                return Ok(HttpEvidence {
-                    final_url: url.to_string(),
-                    status,
-                    headers,
-                    body,
-                });
+                return Ok((url, response));
             }
             Err("redirect limit reached")
         })
         .await
-        .map_err(|_| "collection timed out")?
+        .map_err(|_| "collection timed out")??;
+
+        let mut headers = BTreeMap::new();
+        for name in [
+            "content-type",
+            "strict-transport-security",
+            "x-content-type-options",
+        ] {
+            let values: Vec<_> = response
+                .headers()
+                .get_all(name)
+                .iter()
+                .map(|v| v.to_str().unwrap_or("invalid"))
+                .collect();
+            if !values.is_empty() {
+                headers.insert(name.to_owned(), values.join(","));
+            }
+        }
+        let html = headers.get("content-type").is_some_and(|value| {
+            value
+                .split(';')
+                .next()
+                .is_some_and(|mime| mime.trim().eq_ignore_ascii_case("text/html"))
+        });
+        let body = if redirects && !html {
+            String::new()
+        } else {
+            let (limit, size_error) = if redirects {
+                (MAX_BODY, "response too large")
+            } else {
+                (256, "verification response too large")
+            };
+            match timeout_at(deadline, read_body(&mut response, limit, size_error)).await {
+                Ok(Ok(body)) => body,
+                // Only a complete HTML document can be evaluated, but its headers are useful.
+                _ if redirects => String::new(),
+                Ok(Err(error)) => return Err(error),
+                Err(_) => return Err("collection timed out"),
+            }
+        };
+        self.active()?;
+        Ok(HttpEvidence {
+            final_url: url.to_string(),
+            status: response.status().as_u16(),
+            headers,
+            body,
+        })
     }
 }
 
@@ -417,9 +437,96 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn large_download_retains_header_evidence() {
+        use crate::{domain::Outcome, model::Policy, web};
+        use axum::{Router, routing::get};
+
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let peer = listener.local_addr().unwrap();
+        let resource = format!("http://{peer}/download");
+        let mut scope = Scope::new(&resource, i64::MAX).unwrap();
+        scope.fixture_peer = Some(peer);
+        let router = Router::new().route(
+            "/download",
+            get(|| async {
+                (
+                    [
+                        ("content-type", "application/octet-stream"),
+                        ("x-content-type-options", "nosniff"),
+                    ],
+                    vec![0u8; MAX_BODY + 1],
+                )
+            }),
+        );
+        let server = tokio::spawn(axum::serve(listener, router).into_future());
+        let policy = Policy {
+            download: true,
+            hsts_min: None,
+            sri: false,
+            expected_form: None,
+        };
+
+        let response = scope.fetch(&resource).await;
+        let results = web::evaluate(response.as_ref().map_err(|&err| err), &policy);
+        server.abort();
+        let header = results.iter().find(|obs| obs.rule == "A02-01").unwrap();
+        assert_eq!(header.outcome, Outcome::Passed);
+    }
+
+    #[tokio::test]
+    async fn oversized_html_retains_headers_without_using_the_body_prefix() {
+        use crate::{domain::Outcome, model::Policy, web};
+        use axum::{Router, response::Html, routing::get};
+
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let peer = listener.local_addr().unwrap();
+        let resource = format!("http://{peer}/download");
+        let mut scope = Scope::new(&resource, i64::MAX).unwrap();
+        scope.fixture_peer = Some(peer);
+        let router = Router::new().route(
+            "/download",
+            get(|| async {
+                let form = "<form id=login action='https://example.test/session'><input type=password></form>";
+                (
+                    [("x-content-type-options", "nosniff")],
+                    Html(format!("{form}<!--{}-->", " ".repeat(MAX_BODY))),
+                )
+            }),
+        );
+        let server = tokio::spawn(axum::serve(listener, router).into_future());
+        let policy = Policy {
+            download: true,
+            hsts_min: None,
+            sri: true,
+            expected_form: Some("login".into()),
+        };
+
+        let response = scope.fetch(&resource).await;
+        let results = web::evaluate(response.as_ref().map_err(|&err| err), &policy);
+        server.abort();
+        for (rule, expected) in [
+            ("A02-01", Outcome::Passed),
+            ("A04-01", Outcome::Insufficient),
+            ("A04-02", Outcome::Insufficient),
+            ("A08-04", Outcome::Insufficient),
+        ] {
+            let outcomes: Vec<_> = results
+                .iter()
+                .filter(|obs| obs.rule == rule)
+                .map(|obs| obs.outcome)
+                .collect();
+            assert_eq!(outcomes, [expected], "{rule}");
+        }
+    }
+
+    #[tokio::test]
     async fn real_rescan_requires_a_visible_fixed_form() {
         use crate::{
-            domain::{ChangeStatus, Round, compare},
+            domain::{ChangeStatus, EvaluationProvenance, Round, compare},
             model::Policy,
             web,
         };
@@ -457,6 +564,8 @@ mod tests {
             sri: false,
             expected_form: Some("login".into()),
         };
+        let mut provenance = EvaluationProvenance::at_enqueue();
+        provenance.record_web_evaluation();
         let mut results = Vec::new();
         for (status, expected) in [
             (200, ChangeStatus::New),
@@ -474,6 +583,7 @@ mod tests {
                     target: &resource,
                     version: "1",
                     policy: "unchanged",
+                    provenance: &provenance,
                     observations: r,
                 })
                 .collect::<Vec<_>>();

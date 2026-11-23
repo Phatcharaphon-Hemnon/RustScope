@@ -3,7 +3,7 @@
 {% block title %}Report {{ scan.release }} · RustScope{% endblock %}
 {% block refresh %}{% if pending %}<meta http-equiv="refresh" content="4">{% endif %}{% endblock %}
 {% block content %}
-<nav class="no-print"><a href="/p/{{ p.id }}#history">‹ Back to project</a></nav>
+<nav class="no-print" aria-label="Breadcrumb"><a href="/">Projects</a> / <a href="/p/{{ p.id }}#history">{{ p.name }}</a> / Report</nav>
 <article class="report-shell" data-status="{{ scan.status }}">
 {% if pending %}
 <section class="panel waiting" role="status" aria-live="polite">
@@ -12,6 +12,12 @@
 <progress aria-label="Scan in progress"></progress>
 <p class="hint">Results will appear when the scan finishes</p>
 <a href="/p/{{ p.id }}/s/{{ scan.id }}">Check status now</a>
+</section>
+{% else if failed %}
+<section class="panel">
+<h1>Scan failed</h1>
+<p>{{ p.name }} · {{ scan.release }}</p>
+<p>This scan could not finish. You can start another scan from the project page.</p>
 </section>
 {% else %}
 <p class="print-only running-title">{{ p.name }} · {{ scan.release }}</p>
@@ -23,39 +29,50 @@
 <p>Findings first observed in this scan count as New.</p>{% endif %}
 <p class="print-only">{{ crate::ui::utc_date(scan.at) }} · {{ target }} · Coverage {{ assessed_total }} / {{ canonical_total }} standard rules</p>
 </div>
-<div class="no-print report-controls">{% if view.full && !view.findings_only %}<button data-print hidden>Print</button><noscript>Use your browser’s Print command.</noscript>{% else %}<a class="button" href="?view=full">Print / Save PDF</a>{% endif %}</div></header>
-<section class="panel">
+<div class="no-print report-controls">{% if view.full && !view.findings_only %}<button data-print hidden>Print</button><noscript>Use your browser’s Print command.</noscript>{% else %}<a class="button" href="?view=full">Print / Save PDF</a>{% endif %}{% if view.full %} <a href="/p/{{ p.id }}/s/{{ scan.id }}{% if view.findings_only %}?show=findings{% endif %}">Compact view</a>{% endif %}</div></header>
+<nav class="sections no-print" aria-label="Report sections"><a href="#summary" aria-current="location">Summary</a><a href="#compare">Changed items</a><a href="#results">Rule results</a><a href="#reviews">Reviewer decisions</a></nav>
+<section class="panel" id="summary">
 <h2>Changes by item</h2>
-<ul class="counts">{% for (status,n,first) in totals %}<li>{% if *n > 0 %}<a href="#change-{{ first }}">{% endif %}<strong>{{ n }}</strong><span aria-hidden="true">{% match status %}{% when crate::domain::ChangeStatus::New %}+{% when crate::domain::ChangeStatus::Persistent %}!{% when crate::domain::ChangeStatus::VerifiedFixed %}✓{% else %}?{% endmatch %}</span> {{ status.label() }}{% if *n > 0 %}</a>{% endif %}</li>{% endfor %}</ul>
+<ul class="counts">{% for (status,n,first) in totals %}
+  <li data-comparison-status="{{ "{:?}"|format(status) }}">
+    {% if *n > 0 %}<a href="#change-{{ first }}"><strong>{{ n }}</strong>{{ status.label() }}</a>
+    {% else %}<span><strong>{{ n }}</strong>{{ status.label() }}</span>{% endif %}
+  </li>
+{% endfor %}</ul>
 <details class="outcomes"{% if view.full %} open{% endif %}>
-<summary>Evidence outcomes · △ {{ outcome_counts.insufficient }} Insufficient evidence</summary>
+<summary>Evidence outcomes · {{ outcome_counts.insufficient }} Insufficient evidence</summary>
 <p>Finding: {{ outcome_counts.findings }} · Passed this check: {{ outcome_counts.passed }} · Needs review: {{ outcome_counts.review }} · Not applicable: {{ outcome_counts.na }}</p>{% if !severity_counts.is_empty() %}<p>Findings by severity</p>{% endif %}
 <ul class="severity-counts">{% for (severity,count) in severity_counts %}<li>{{ count }} {{ severity }}</li>{% endfor %}</ul>
 </details>
 </section>
 <section class="panel" id="compare">
 <h2>Changed items</h2>
-<p>A verified fix requires a passing result for the same item, with matching project, target, ruleset version, environment and policy.</p>
+<p>A verified fix requires a passing result for the same item, with matching project, target, evaluator version, environment and policy. Checks that use advisory data also require the same advisory snapshot.</p>
 {% if changes.is_empty() %}<p>No items to compare</p>{% else %}
 <table>
 <thead>
 <tr><th>Rule</th><th>Item</th><th>Change</th><th class="change-evidence">Evidence</th></tr>
 </thead>
 <tbody>{% for row in changes %}{% let change = row.change %}{% let observed = row.observations %}
-<tr id="change-{{ loop.index0 }}" data-rule="{{ change.rule }}" data-change="{{ "{:?}"|format(change.status) }}"><th scope="row">{{ change.rule }}</th><td data-label="Item"><code>{{ change.item }}</code></td><td data-label="Change">{{ change.status.label() }}</td><td class="change-evidence">{% if observed.is_empty() %}No current observation{% if let Some(reason) = row.rule_gap %}<p>Rule evidence gap: {{ reason|legacy_evidence }}</p>{% endif %}{% else %}{% if change.status == crate::domain::ChangeStatus::NotComparable %}{% for (_, obs) in observed %}<p>{{ obs.observed|legacy_evidence }}</p>{% endfor %}{% endif %}<a href="{% if view.findings_only %}?show=all{% endif %}#item-{{ observed[0].0 }}">View rule evidence</a>{% endif %}</td></tr>
+<tr id="change-{{ loop.index0 }}" data-rule="{{ change.rule }}" data-change="{{ "{:?}"|format(change.status) }}">
+<th scope="row">{{ change.rule }}</th>
+<td data-label="Item"><code>{{ change.item }}</code></td>
+<td data-label="Change"><span class="change-status" data-comparison-status="{{ "{:?}"|format(change.status) }}">{{ change.status.label() }}</span></td>
+<td class="change-evidence" data-label="Evidence">{% if observed.is_empty() %}No current observation{% if let Some(reason) = row.rule_gap %}<p>Rule evidence gap: {{ reason|legacy_evidence }}</p>{% endif %}{% else %}{% if change.status == crate::domain::ChangeStatus::NotComparable || change.status == crate::domain::ChangeStatus::AdvisoryChanged %}{% for (_, obs) in observed %}<p>{{ obs.observed|legacy_evidence }}</p>{% endfor %}{% endif %}<a href="{% if view.findings_only %}?show=all{% endif %}#item-{{ observed[0].0 }}">View rule evidence</a>{% endif %}</td>
+</tr>
 {% endfor %}</tbody>
 </table>
 {% endif %}</section>
 <section class="panel" id="results">
 <div class="section-title">
-<h2>Rule results</h2><a class="no-print" href="{% if view.findings_only %}?show=all{% else %}?show=findings{% endif %}#results">{% if view.findings_only %}All results{% else %}Findings only{% endif %}</a></div>
+<h2>Rule results</h2><a class="no-print" href="{% if view.findings_only %}?show=all{% else %}?show=findings{% endif %}{% if view.full %}&amp;view=full{% endif %}#results">{% if view.findings_only %}All results{% else %}Findings only{% endif %}</a></div>
 {% include "report-groups.html" %}
 </section>
 <section id="reviews" class="panel">
 <h2>Reviewer decisions</h2>
 {% for (review, rule) in reviews %}
 <details class="result"{% if view.full %} open{% endif %}>
-<summary>{{ rule.id }} {{ rule.name }} · {{ crate::ui::decision_label(review.decision.as_str()) }} · {{ review.reviewer }} · {{ crate::ui::utc_date(review.at) }}</summary>
+<summary>{{ rule.id }} {{ rule.name }} · {{ crate::ui::report::decision_label(review.decision.as_str()) }} · {{ review.reviewer }} · {{ crate::ui::utc_date(review.at) }}</summary>
 <dl>
 <dt>OWASP category / rule version</dt><dd>{{ rule.category }} / {{ rule.version }}</dd>
 <dt>Release</dt><dd>{{ scan.release }}</dd>
@@ -113,6 +130,10 @@
 <dt>Started</dt><dd>{{ crate::ui::utc_date(scan.at) }}</dd>
 {% if scan.observed_at > 0 %}<dt>Web evidence collected</dt><dd>{{ crate::ui::utc_date(scan.observed_at) }}</dd>{% endif %}
 <dt>Ruleset version</dt><dd>{{ scan.version }}</dd>
+{% if let Some(version) = scan.provenance.dependency_rules %}<dt>Cargo.lock evaluator version</dt><dd>{{ version }}</dd>{% endif %}
+{% if let Some(version) = scan.provenance.web_rules %}<dt>Web evaluator version</dt><dd>{{ version }}</dd>{% endif %}
+{% if let Some(hash) = scan.provenance.rustsec %}<dt>RustSec SHA-256</dt><dd><code>{{ hash }}</code></dd>{% endif %}
+{% if let Some(hash) = scan.provenance.retirejs %}<dt>Retire.js SHA-256</dt><dd><code>{{ hash }}</code></dd>{% endif %}
 <dt>Download</dt><dd>{% if scan.policy.download %}Yes{% else %}No{% endif %}</dd>
 <dt>Minimum HSTS max-age</dt><dd>{% match scan.policy.hsts_min %}{% when Some with (age) %}{{ age }} seconds{% when None %}Unspecified{% endmatch %}</dd>
 <dt>Expected form</dt><dd>{% if scan.policy.expected_form.is_some() %}HTML id supplied{% else %}Unspecified{% endif %}</dd>

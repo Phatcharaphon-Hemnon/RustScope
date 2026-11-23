@@ -3,10 +3,12 @@ mod dependencies;
 mod domain;
 mod legacy_evidence;
 mod model;
+mod preflight;
 mod scope;
 mod storage;
 mod ui;
 mod web;
+mod worker;
 
 use anyhow::Context;
 use auth::{Session, Sessions, label, now, token};
@@ -19,9 +21,9 @@ use axum::{
     routing::{get, post},
 };
 use model::{Policy, Project, Review, Scan};
-use scope::{HttpEvidence, Scope};
+use scope::Scope;
 use serde::Deserialize;
-use std::{collections::HashMap, fs, net::Ipv4Addr, path::PathBuf, sync::Arc, time::Duration};
+use std::{collections::HashMap, fs, net::Ipv4Addr, path::PathBuf, sync::Arc};
 use storage::Store;
 
 type Fields = HashMap<String, String>;
@@ -29,6 +31,7 @@ struct App {
     store: Store,
     accounts: PathBuf,
     sessions: Sessions,
+    previews: preflight::Previews,
     hosts: [String; 2],
     wake: tokio::sync::Notify,
 }
@@ -298,6 +301,7 @@ async fn project(
         &s,
         &token(),
         ui::Feedback::default(),
+        None,
     )?))
 }
 async fn owner(app: &App, s: &Session, id: &str) -> Answer<Project> {
@@ -341,7 +345,7 @@ async fn verify(
                     "The website must be reachable through a public IPv4 address"
                 }
                 "scope expired" => {
-                    "The scope expired. Create a new project to request a new scope."
+                    "The scope expired. Renew it in this project to get a new challenge."
                 }
                 _ => {
                     "The verification file could not be reached. Check the URL and site configuration and try again."
@@ -358,13 +362,39 @@ async fn verify(
                     message,
                     values: None,
                 },
+                None,
             )?;
             return Ok((StatusCode::UNPROCESSABLE_ENTITY, Html(html)).into_response());
         }
-        app.store.verify(&s.user, &id).await?;
+        app.store
+            .verify(&s.user, &id, &p.challenge)
+            .await
+            .map_err(|_| denied())?;
     }
     Ok(Redirect::to(&format!("/p/{id}")).into_response())
 }
+async fn renew_scope(
+    State(app): State<Shared>,
+    Path(id): Path<String>,
+    h: HeaderMap,
+    Form(f): Form<Fields>,
+) -> Answer<Response> {
+    let s = mutation(&app, &h, &f)?;
+    let p = owner(&app, &s, &id).await?;
+    if p.expires > now() {
+        return Err(denied());
+    }
+    let Some(days) = field(&f, "days")
+        .parse::<i64>()
+        .ok()
+        .filter(|days| (1..=30).contains(days))
+    else {
+        return project_error(&app, &s, &p, &f, "days", "Enter 1–30 days").await;
+    };
+    app.store.renew_scope(&s.user, &id, days).await?;
+    Ok(Redirect::to(&format!("/p/{id}")).into_response())
+}
+
 async fn project_error(
     app: &App,
     s: &Session,
@@ -378,6 +408,11 @@ async fn project_error(
         .filter(|id| label(id))
         .cloned()
         .unwrap_or_else(token);
+    let draft = if field(f, "has_preview") == "on" {
+        app.previews.get(&s.csrf, &p.id, &request)?
+    } else {
+        None
+    };
     let page = ui::project(
         p,
         "owner",
@@ -389,6 +424,7 @@ async fn project_error(
             message,
             values: Some(f),
         },
+        draft.as_ref(),
     )?;
     Ok((StatusCode::BAD_REQUEST, Html(page)).into_response())
 }
@@ -494,18 +530,46 @@ async fn scan(
     if lock.len() > 256 * 1024 {
         return form_error("lock", "Cargo.lock exceeds 262,144 bytes").await;
     }
-    let input = if !lock.trim().is_empty() {
-        Some(lock)
-    } else if p.demo {
-        Some(include_str!("../fixtures/demo/dependencies.lock"))
-    } else {
-        None
-    };
-    let results = dependencies::evaluate(input);
     let environment = f.get("environment").map(String::as_str).unwrap_or("test");
     if !matches!(environment, "test" | "staging" | "production") {
         return form_error("environment", "Choose a listed environment").await;
     }
+    let preview = if field(&f, "has_preview") == "on" {
+        let Some(draft) = app.previews.get(&s.csrf, &id, request)? else {
+            return form_error(
+                "lock",
+                "This readiness check expired. Paste any Cargo.lock again and check readiness.",
+            )
+            .await;
+        };
+        Some(draft)
+    } else {
+        None
+    };
+    let reused = preview.filter(|draft| {
+        lock.trim().is_empty()
+            && field(&f, "discard_preview_lock") != "on"
+            && draft.lockfile_used
+            && draft.scan.release == release
+            && draft.scan.environment == environment
+    });
+    let lockfile_used = !lock.trim().is_empty() || reused.is_some();
+    let (results, provenance) = match reused {
+        Some(draft) => (draft.scan.results, draft.scan.provenance),
+        None => {
+            let input = if !lock.trim().is_empty() {
+                Some(lock)
+            } else if p.demo {
+                Some(include_str!("../fixtures/demo/dependencies.lock"))
+            } else {
+                None
+            };
+            (
+                dependencies::evaluate(input),
+                domain::EvaluationProvenance::at_enqueue(),
+            )
+        }
+    };
     let scan = Scan {
         id: token(),
         project: id.clone(),
@@ -513,14 +577,30 @@ async fn scan(
         environment: environment.into(),
         target: target.into(),
         policy,
-        version: "1".into(),
+        version: domain::RULESET_VERSION.into(),
+        provenance,
         at: now(),
         observed_at: 0,
         status: "queued".into(),
         results,
     };
     if field(&f, "preview") == "on" {
-        return Ok(Html(ui::preview(&p, &scan, &s)?).into_response());
+        let draft = preflight::Draft {
+            scan,
+            fixture: fixture.into(),
+            lockfile_used,
+        };
+        let html = ui::project(
+            &p,
+            "owner",
+            &app.store.scans(&s.user, &id).await?,
+            &s,
+            request,
+            ui::Feedback::default(),
+            Some(&draft),
+        )?;
+        app.previews.remember(&s.csrf, request, draft)?;
+        return Ok(Html(html).into_response());
     }
     let actual = app
         .store
@@ -550,17 +630,13 @@ async fn report(
         .position(|v| v.id == sid)
         .ok_or_else(denied)?;
     let reviews = app.store.reviews(&s.user, &id, &sid).await?;
-    let view = ui::ReportView {
+    let view = ui::report::ReportView {
         full: query.view.as_deref() == Some("full"),
         findings_only: query.show.as_deref() == Some("findings"),
     };
     let scan = &history[index];
     let rounds = &history[..=index];
-    let html = if view.full || view.findings_only {
-        ui::report_with_view(&p, &role, scan, rounds, &reviews, &s, view)?
-    } else {
-        ui::report(&p, &role, scan, rounds, &reviews, &s)?
-    };
+    let html = ui::report::render(&p, &role, scan, rounds, &reviews, &s, view)?;
     Ok(Html(html))
 }
 
@@ -685,67 +761,6 @@ async fn review(
     Ok(Redirect::to(&format!("/p/{id}/s/{sid}")))
 }
 
-fn fixture_response(name: &str) -> Result<HttpEvidence, &'static str> {
-    let (status, body) = match name {
-        "issue" | "persistent" => (200, include_str!("../fixtures/demo/issue.html")),
-        "forbidden" => (403, ""),
-        "fixed" => (200, include_str!("../fixtures/demo/fixed.html")),
-        _ => return Err("unknown fixture"),
-    };
-    Ok(HttpEvidence {
-        final_url: "https://fixture.invalid/login".into(),
-        status,
-        headers: [
-            ("content-type".into(), "text/html".into()),
-            ("strict-transport-security".into(), "max-age=86400".into()),
-            ("x-content-type-options".into(), "nosniff".into()),
-        ]
-        .into(),
-        body: body.into(),
-    })
-}
-
-async fn run_one(app: &App) -> anyhow::Result<bool> {
-    let Some((p, mut scan, fixture)) = app.store.claim().await? else {
-        return Ok(false);
-    };
-    let response = match Scope::new(&p.base, p.expires).and_then(|s| s.with_upgrade(p.upgrade)) {
-        Ok(scope) if p.verified && scope.contains(&scan.target) => {
-            if p.demo {
-                fixture_response(&fixture)
-            } else {
-                scope.fetch(&scan.target).await
-            }
-        }
-        _ => Err("scope unavailable"),
-    };
-    scan.observed_at = now();
-    scan.results.extend(web::evaluate(
-        response.as_ref().map_err(|e| *e),
-        &scan.policy,
-    ));
-    scan.status = if scan
-        .results
-        .iter()
-        .any(|v| v.outcome == domain::Outcome::Insufficient)
-    {
-        "partial"
-    } else {
-        "complete"
-    }
-    .into();
-    app.store.finish(&scan).await?;
-    Ok(true)
-}
-
-async fn worker(app: &App) -> anyhow::Result<()> {
-    loop {
-        if !run_one(app).await? {
-            tokio::select! { _=app.wake.notified()=>{}, _=tokio::time::sleep(Duration::from_secs(5))=>{} }
-        }
-    }
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let dir = PathBuf::from(std::env::var_os("RUSTSCOPE_STATE").unwrap_or_else(|| "state".into()));
@@ -776,6 +791,7 @@ async fn main() -> anyhow::Result<()> {
         store: Store::open(&dir.join("rustscope.sqlite")).await?,
         accounts: dir,
         sessions: Sessions::default(),
+        previews: preflight::Previews::default(),
         hosts: [
             format!("127.0.0.1:{}", address.port()),
             format!("localhost:{}", address.port()),
@@ -828,6 +844,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/p/{id}", get(project))
         .route("/p/{id}/member", post(member))
         .route("/p/{id}/verify", post(verify))
+        .route("/p/{id}/renew", post(renew_scope))
         .route("/p/{id}/scan", post(scan))
         .route("/p/{id}/s/{sid}", get(report))
         .route("/p/{id}/s/{sid}/review", post(review))
@@ -841,7 +858,7 @@ async fn main() -> anyhow::Result<()> {
     println!("RustScope http://{address}");
     tokio::select! {
         result=server.into_future()=>result?,
-        result=worker(&app)=>result?,
+        result=worker::run(&app.store, &app.wake)=>result?,
     }
     Ok(())
 }

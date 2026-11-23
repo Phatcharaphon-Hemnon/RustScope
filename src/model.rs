@@ -1,4 +1,4 @@
-use crate::domain::Observation;
+use crate::domain::{EvaluationProvenance, Observation, RULESET_VERSION};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -32,11 +32,24 @@ pub struct Scan {
     pub target: String,
     pub policy: Policy,
     pub version: String,
+    #[serde(default)]
+    pub provenance: EvaluationProvenance,
     pub at: i64,
     #[serde(default)]
     pub observed_at: i64,
     pub status: String,
     pub results: Vec<Observation>,
+}
+
+impl Scan {
+    pub fn record_web_evaluation(&mut self) {
+        // Old queued records have a known dependency evaluator, but no snapshot fingerprint.
+        self.provenance
+            .dependency_rules
+            .get_or_insert_with(|| self.version.clone());
+        self.provenance.record_web_evaluation();
+        self.version = RULESET_VERSION.into();
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -48,4 +61,26 @@ pub struct Review {
     pub rationale: String,
     pub evidence: String,
     pub at: i64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn finishing_a_legacy_queued_scan_preserves_known_dependency_revision_only() {
+        let mut scan: Scan = serde_json::from_value(serde_json::json!({
+            "id": "s", "project": "p", "release": "r", "target": "t",
+            "policy": {"download": false, "sri": false},
+            "version": "1", "at": 100, "status": "queued", "results": []
+        }))
+        .unwrap();
+        assert_eq!(scan.provenance, EvaluationProvenance::default());
+        scan.record_web_evaluation();
+        assert_eq!(scan.version, RULESET_VERSION);
+        assert_eq!(scan.provenance.dependency_rules.as_deref(), Some("1"));
+        assert!(scan.provenance.rustsec.is_none());
+        assert_eq!(scan.provenance.web_rules.as_deref(), Some(RULESET_VERSION));
+        assert!(scan.provenance.retirejs.is_some());
+    }
 }

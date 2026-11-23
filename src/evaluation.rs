@@ -1,5 +1,6 @@
 //! Held-out, labelled examples. Metrics are per target/rule, with abstentions counted separately.
 use super::*;
+use crate::scope::HttpEvidence;
 use domain::Outcome;
 use std::collections::BTreeMap;
 
@@ -139,11 +140,14 @@ fn missing_url_and_lockfile_preserve_open_findings() {
     ))));
     let mut after = web::evaluate(Err("unavailable"), &policy);
     after.extend(dependencies::evaluate(None));
+    let mut provenance = domain::EvaluationProvenance::at_enqueue();
+    provenance.record_web_evaluation();
     let rounds = [before.as_slice(), after.as_slice()].map(|observations| domain::Round {
         project: "evaluation",
         target: "checkout",
         policy: "same",
-        version: "1",
+        version: domain::RULESET_VERSION,
+        provenance: &provenance,
         observations,
     });
     let changes = domain::compare(&rounds);

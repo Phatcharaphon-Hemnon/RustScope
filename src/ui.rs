@@ -1,16 +1,15 @@
-use crate::auth::Session;
+pub(crate) mod report;
+
 use crate::{
-    REASONS,
+    auth::Session,
     dependencies::{MAINTENANCE, VULNERABILITIES},
-    domain::{
-        Change, ChangeStatus, Observation, Outcome, Round, Rule, catalog, compare, extensions,
-    },
-    model::{Project, Review, Scan},
+    domain::{Outcome, Rule, catalog, extensions},
+    model::{Project, Scan},
+    preflight::Draft,
     scope::{Scope, safe_url},
     web::redacted_location,
 };
 use askama::Template;
-use std::collections::BTreeMap;
 
 mod filters {
     use askama::Values;
@@ -107,6 +106,10 @@ pub struct Feedback<'a> {
 }
 
 impl Feedback<'_> {
+    fn checked(&self, name: &str, default: &bool) -> bool {
+        self.value(name, if *default { "on" } else { "" }) == "on"
+    }
+
     fn value<'a>(&'a self, name: &str, default: &'a str) -> &'a str {
         if matches!(self.field, "user" | "role") != matches!(name, "user" | "role") {
             return default;
@@ -132,11 +135,63 @@ struct ProjectPage<'a> {
     request_id: &'a str,
     rules: Vec<Rule>,
     evidence: EvidenceGroups<'a>,
+    scan_form: ScanForm<'a>,
 }
 
-impl ProjectPage<'_> {
-    fn demo_default<'a>(&self, value: &'a str) -> &'a str {
-        if self.p.demo { value } else { "" }
+struct ScanForm<'a> {
+    release: &'a str,
+    target: &'a str,
+    environment: &'a str,
+    fixture: &'a str,
+    download: bool,
+    hsts_min: String,
+    expected_form: &'a str,
+    sri: bool,
+    previewed: bool,
+    lockfile_used: bool,
+}
+
+impl<'a> ScanForm<'a> {
+    fn new(project: &'a Project, draft: Option<&'a Draft>) -> Self {
+        if let Some(draft) = draft {
+            let scan = &draft.scan;
+            return Self {
+                release: &scan.release,
+                target: &scan.target,
+                environment: &scan.environment,
+                fixture: &draft.fixture,
+                download: scan.policy.download,
+                hsts_min: scan
+                    .policy
+                    .hsts_min
+                    .map(|age| age.to_string())
+                    .unwrap_or_default(),
+                expected_form: scan.policy.expected_form.as_deref().unwrap_or_default(),
+                sri: scan.policy.sri,
+                previewed: true,
+                lockfile_used: draft.lockfile_used,
+            };
+        }
+        Self {
+            release: "",
+            target: if project.demo {
+                "https://fixture.invalid/login"
+            } else {
+                &project.base
+            },
+            environment: "test",
+            fixture: "issue",
+            download: project.demo,
+            hsts_min: if project.demo {
+                "3600".into()
+            } else {
+                String::new()
+            },
+            expected_form: if project.demo { "login" } else { "" },
+            sri: project.demo,
+            previewed: false,
+            lockfile_used: false,
+        }
     }
 }
 
@@ -147,6 +202,7 @@ pub fn project(
     session: &Session,
     request_id: &str,
     feedback: Feedback<'_>,
+    draft: Option<&Draft>,
 ) -> anyhow::Result<String> {
     let owner = role == "owner";
     let scope = Scope::new(&p.base, p.expires).ok();
@@ -175,312 +231,9 @@ pub fn project(
         scans,
         session,
         request_id,
-        evidence: evidence_groups(&rules, None),
+        evidence: evidence_groups(&rules, draft.map(|draft| &draft.scan)),
+        scan_form: ScanForm::new(p, draft),
         rules,
-    }
-    .render()?)
-}
-
-struct Coverage {
-    method: &'static str,
-    description: &'static str,
-    total: usize,
-    assessed: usize,
-    executed: usize,
-}
-
-#[derive(Default)]
-struct OutcomeCounts {
-    findings: usize,
-    insufficient: usize,
-    passed: usize,
-    review: usize,
-    na: usize,
-}
-
-struct ChangedItem<'a> {
-    change: Change,
-    observations: Vec<(usize, &'a Observation)>,
-    rule_gap: Option<&'a str>,
-}
-
-struct ResultGroup<'a> {
-    rule: Rule,
-    observations: Vec<(usize, &'a Observation)>,
-    summary: String,
-    finding: bool,
-}
-
-#[derive(Default)]
-pub struct ReportView {
-    pub full: bool,
-    pub findings_only: bool,
-}
-
-#[derive(Template)]
-#[template(path = "report.html")]
-struct Report<'a> {
-    p: &'a Project,
-    scan: &'a Scan,
-    target: String,
-    session: &'a Session,
-    pending: bool,
-    may_review: bool,
-    view: ReportView,
-    reasons: &'static [&'static str],
-    rules: Vec<Rule>,
-    coverage: Vec<Coverage>,
-    assessed_total: usize,
-    canonical_total: usize,
-    outcome_counts: OutcomeCounts,
-    severity_counts: Vec<(&'static str, usize)>,
-    groups: Vec<ResultGroup<'a>>,
-    totals: Vec<(ChangeStatus, usize, usize)>,
-    changes: Vec<ChangedItem<'a>>,
-    previous: Option<&'a Scan>,
-    reviews: Vec<(&'a Review, Rule)>,
-}
-
-pub fn report(
-    p: &Project,
-    role: &str,
-    scan: &Scan,
-    history: &[Scan],
-    reviews: &[Review],
-    session: &Session,
-) -> anyhow::Result<String> {
-    report_with_view(
-        p,
-        role,
-        scan,
-        history,
-        reviews,
-        session,
-        ReportView::default(),
-    )
-}
-
-pub fn report_with_view(
-    p: &Project,
-    role: &str,
-    scan: &Scan,
-    history: &[Scan],
-    reviews: &[Review],
-    session: &Session,
-    view: ReportView,
-) -> anyhow::Result<String> {
-    let pending = in_progress(scan);
-    let mut changes = Vec::new();
-    if !pending {
-        let finished: Vec<_> = history.iter().filter(|scan| !in_progress(scan)).collect();
-        let policies = finished
-            .iter()
-            .map(|scan| serde_json::to_string(&(&scan.policy, &scan.environment)))
-            .collect::<Result<Vec<_>, _>>()?;
-        let rounds: Vec<_> = finished
-            .iter()
-            .zip(&policies)
-            .map(|(scan, policy)| Round {
-                project: &scan.project,
-                target: &scan.target,
-                policy,
-                version: &scan.version,
-                observations: &scan.results,
-            })
-            .collect();
-        changes = compare(&rounds);
-    }
-    let rules = visible_rules();
-    let observations: Vec<_> = scan
-        .results
-        .iter()
-        .filter(|_| !pending)
-        .filter_map(|obs| {
-            rules
-                .iter()
-                .find(|rule| rule.implemented && rule.id == obs.rule)
-                .map(|rule| (obs, rule.clone()))
-        })
-        .collect();
-    let reviews = reviews
-        .iter()
-        .filter(|review| review.scan == scan.id && !pending)
-        .filter_map(|review| {
-            rules
-                .iter()
-                .find(|rule| rule.method == "E" && rule.id == review.rule)
-                .map(|rule| (review, rule.clone()))
-        })
-        .collect::<Vec<_>>();
-    let coverage = [
-        ("A", "Direct evidence"),
-        ("S", "Source analysis"),
-        ("E", "Manual evidence review"),
-        ("X", "Extensions"),
-    ]
-    .into_iter()
-    .map(|(method, description)| {
-        let mut coverage = Coverage {
-            method,
-            description,
-            total: 0,
-            assessed: 0,
-            executed: 0,
-        };
-        for rule in rules.iter().filter(|rule| rule.method == method) {
-            coverage.total += 1;
-            if observations.iter().any(|(_, r)| r.id == rule.id) {
-                coverage.executed += 1;
-            }
-            if observations.iter().any(|(obs, r)| {
-                r.id == rule.id
-                    && matches!(
-                        obs.outcome,
-                        Outcome::Finding | Outcome::Review | Outcome::Passed
-                    )
-            }) || (method == "E"
-                && reviews.iter().any(|(review, r)| {
-                    r.id == rule.id
-                        && matches!(review.decision.as_str(), "Finding" | "Review" | "Passed")
-                }))
-            {
-                coverage.assessed += 1;
-            }
-        }
-        coverage
-    })
-    .collect::<Vec<_>>();
-    let canonical = coverage.iter().filter(|row| row.method != "X");
-    let assessed_total = canonical.clone().map(|row| row.assessed).sum();
-    let canonical_total = canonical.map(|row| row.total).sum();
-    let mut outcome_counts = OutcomeCounts::default();
-    let mut severity_counts = BTreeMap::new();
-    let mut groups = BTreeMap::new();
-    let mut items = BTreeMap::new();
-    let mut gaps = BTreeMap::new();
-    for (index, (obs, rule)) in observations.into_iter().enumerate() {
-        items
-            .entry((obs.rule.clone(), obs.item.clone()))
-            .or_insert_with(Vec::new)
-            .push((index, obs));
-        match obs.outcome {
-            Outcome::Finding => {
-                outcome_counts.findings += 1;
-                *severity_counts.entry(rule.severity).or_default() += 1;
-            }
-            Outcome::Insufficient => {
-                outcome_counts.insufficient += 1;
-                gaps.entry(rule.id).or_insert(obs.observed.as_str());
-            }
-            Outcome::Passed => outcome_counts.passed += 1,
-            Outcome::Review => outcome_counts.review += 1,
-            Outcome::Na => outcome_counts.na += 1,
-        }
-        if !view.findings_only || obs.outcome == Outcome::Finding {
-            let group = groups.entry(rule.id).or_insert_with(|| ResultGroup {
-                rule,
-                observations: Vec::new(),
-                summary: String::new(),
-                finding: false,
-            });
-            group.finding |= obs.outcome == Outcome::Finding;
-            group.observations.push((index, obs));
-        }
-    }
-    let mut groups: Vec<_> = groups.into_values().collect();
-    groups.sort_by_key(|g| (!g.finding, severity_rank(g.rule.severity), g.rule.id));
-    for group in &mut groups {
-        let mut parts = Vec::new();
-        for (outcome, noun) in [
-            (Outcome::Finding, "finding"),
-            (Outcome::Passed, "passed"),
-            (Outcome::Insufficient, "insufficient evidence"),
-            (Outcome::Review, "needs review"),
-            (Outcome::Na, "not applicable"),
-        ] {
-            let n = group
-                .observations
-                .iter()
-                .filter(|(_, o)| o.outcome == outcome)
-                .count();
-            if n > 0 {
-                parts.push(format!(
-                    "{n} {noun}{}",
-                    if n > 1 && outcome == Outcome::Finding {
-                        "s"
-                    } else {
-                        ""
-                    }
-                ));
-            }
-        }
-        group.summary = if parts.len() == 1 {
-            format!("Outcome: {}", group.observations[0].1.outcome.label())
-        } else {
-            format!("Outcomes: {}", parts.join(" · "))
-        };
-    }
-    let totals = [
-        ChangeStatus::New,
-        ChangeStatus::Persistent,
-        ChangeStatus::VerifiedFixed,
-        ChangeStatus::NotComparable,
-    ]
-    .into_iter()
-    .map(|status| {
-        let first = changes.iter().position(|c| c.status == status).unwrap_or(0);
-        (
-            status,
-            changes.iter().filter(|c| c.status == status).count(),
-            first,
-        )
-    })
-    .collect();
-    let changes = changes
-        .into_iter()
-        .map(|change| {
-            let observed = items
-                .remove(&(change.rule.clone(), change.item.clone()))
-                .unwrap_or_default();
-            let rule_gap = observed
-                .is_empty()
-                .then(|| gaps.get(change.rule.as_str()).copied())
-                .flatten();
-            ChangedItem {
-                change,
-                observations: observed,
-                rule_gap,
-            }
-        })
-        .collect();
-    let mut severity_counts: Vec<_> = severity_counts.into_iter().collect();
-    severity_counts.sort_by_key(|(severity, _)| (severity_rank(severity), *severity));
-    Ok(Report {
-        p,
-        scan,
-        target: report_target(p, scan),
-        session,
-        pending,
-        view,
-        may_review: matches!(scan.status.as_str(), "complete" | "partial")
-            && matches!(role, "owner" | "reviewer"),
-        reasons: &REASONS,
-        rules,
-        coverage,
-        assessed_total,
-        canonical_total,
-        outcome_counts,
-        severity_counts,
-        groups,
-        totals,
-        changes,
-        previous: history.iter().rev().find(|prior| {
-            prior.id != scan.id
-                && prior.project == scan.project
-                && prior.target == scan.target
-                && !in_progress(prior)
-        }),
-        reviews,
     }
     .render()?)
 }
@@ -569,27 +322,6 @@ fn evidence_groups<'a>(rules: &[Rule], scan: Option<&'a Scan>) -> EvidenceGroups
     groups
 }
 
-#[derive(Template)]
-#[template(path = "preview.html")]
-struct Preview<'a> {
-    session: &'a Session,
-    p: &'a Project,
-    scan: &'a Scan,
-    target: String,
-    evidence: EvidenceGroups<'a>,
-}
-
-pub fn preview(p: &Project, scan: &Scan, session: &Session) -> anyhow::Result<String> {
-    Ok(Preview {
-        session,
-        p,
-        scan,
-        target: report_target(p, scan),
-        evidence: evidence_groups(&visible_rules(), Some(scan)),
-    }
-    .render()?)
-}
-
 fn dependency_readiness<'a>(scan: &'a Scan, rule: &str) -> &'a str {
     let mut observations = scan.results.iter().filter(|obs| obs.rule == rule);
     if observations
@@ -623,21 +355,6 @@ fn report_target(p: &Project, scan: &Scan) -> String {
     }
 }
 
-fn severity_rank(severity: &str) -> u8 {
-    match severity {
-        "High" => 0,
-        "Medium" => 1,
-        "Low" => 2,
-        "Per advisory" => 3,
-        "Context-dependent" => 4,
-        _ => 5,
-    }
-}
-
-fn in_progress(scan: &Scan) -> bool {
-    matches!(scan.status.as_str(), "queued" | "running")
-}
-
 fn utc_date(seconds: &i64) -> String {
     chrono::DateTime::from_timestamp(*seconds, 0).map_or_else(
         || "—".into(),
@@ -664,20 +381,10 @@ fn environment_label(environment: &str) -> &str {
     }
 }
 
-fn decision_label(decision: &str) -> &'static str {
-    match decision {
-        "Finding" => Outcome::Finding.label(),
-        "Review" => Outcome::Review.label(),
-        "Passed" => Outcome::Passed.label(),
-        "Na" => Outcome::Na.label(),
-        _ => Outcome::Insufficient.label(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::Policy;
+    use crate::{domain::Observation, model::Policy};
 
     fn session() -> Session {
         Session {
@@ -709,7 +416,12 @@ mod tests {
                 expected_form: None,
             },
             environment: "test".into(),
-            version: "1".into(),
+            version: crate::domain::RULESET_VERSION.into(),
+            provenance: {
+                let mut provenance = crate::domain::EvaluationProvenance::at_enqueue();
+                provenance.record_web_evaluation();
+                provenance
+            },
             at: 1,
             observed_at: 2,
             status: "complete".into(),
@@ -733,18 +445,37 @@ mod tests {
             &session(),
             "request",
             Feedback::default(),
+            None,
         )
         .unwrap();
         assert!(!viewer.contains(&p.challenge));
         assert!(!viewer.contains("/verify"));
         assert!(!viewer.contains("/member"));
         assert!(viewer.contains("A10-06"));
-        let owner = project(&p, "owner", &[], &session(), "request", Feedback::default()).unwrap();
+        let owner = project(
+            &p,
+            "owner",
+            &[],
+            &session(),
+            "request",
+            Feedback::default(),
+            None,
+        )
+        .unwrap();
         assert!(owner.contains(&p.challenge));
         assert!(owner.contains("/verify"));
 
         let history = [scan.clone()];
-        let body = report(&p, "viewer", &scan, &history, &[], &session()).unwrap();
+        let body = report::render(
+            &p,
+            "viewer",
+            &scan,
+            &history,
+            &[],
+            &session(),
+            Default::default(),
+        )
+        .unwrap();
         assert!(!body.contains(&p.name));
         assert!(!body.contains(&scan.results[0].observed));
         assert!(!body.contains(&scan.target));
@@ -773,7 +504,10 @@ mod tests {
             observation("A02-01", Outcome::Finding, "download/a"),
         ]);
         let render = |scan: &Scan| {
-            Html::parse_document(&report(&p, "viewer", scan, &[], &[], &session()).unwrap())
+            Html::parse_document(
+                &report::render(&p, "viewer", scan, &[], &[], &session(), Default::default())
+                    .unwrap(),
+            )
         };
         let severity = Selector::parse(".severity-counts li").unwrap();
         let html = render(&scan);
@@ -804,7 +538,16 @@ mod tests {
             ("complete", ""),
         ] {
             scan.status = status.into();
-            let html = report(&p, "viewer", &scan, &[], &[], &session()).unwrap();
+            let html = report::render(
+                &p,
+                "viewer",
+                &scan,
+                &[],
+                &[],
+                &session(),
+                Default::default(),
+            )
+            .unwrap();
             assert_eq!(html.contains("http-equiv=\"refresh\""), !title.is_empty());
             if !title.is_empty() {
                 assert!(html.contains(&format!("<h1>{title}</h1>")));
@@ -835,10 +578,10 @@ mod tests {
         .collect();
         let render = |view| {
             Html::parse_document(
-                &report_with_view(&p, "viewer", &scan, &[], &[], &session(), view).unwrap(),
+                &report::render(&p, "viewer", &scan, &[], &[], &session(), view).unwrap(),
             )
         };
-        let compact = render(ReportView::default());
+        let compact = render(report::ReportView::default());
         let observations = Selector::parse("#results details[data-rule]").unwrap();
         let badges = Selector::parse("[data-outcome]").unwrap();
         let outcomes: Vec<_> = compact
@@ -847,7 +590,7 @@ mod tests {
             .collect();
         assert_eq!(
             outcomes,
-            ["Passed", "Insufficient", "Finding", "Finding", "Na"]
+            ["Finding", "Finding", "Insufficient", "Passed", "Na"]
         );
         assert_eq!(compact.select(&observations).count(), 1);
         assert_eq!(
@@ -863,7 +606,7 @@ mod tests {
                 .collect::<String>()
                 .contains("Outcomes: 2 findings · 1 passed")
         );
-        let full = render(ReportView {
+        let full = render(report::ReportView {
             full: true,
             findings_only: false,
         });
@@ -872,7 +615,7 @@ mod tests {
                 .next()
                 .is_none()
         );
-        let findings = render(ReportView {
+        let findings = render(report::ReportView {
             full: false,
             findings_only: true,
         });
@@ -888,18 +631,97 @@ mod tests {
 
     #[test]
     fn preflight_lists_implemented_rules_and_missing_inputs() {
-        let (p, mut scan) = example();
+        let (mut p, mut scan) = example();
+        p.verified = true;
         scan.results = vec![Observation {
             rule: "A03-01".into(),
             item: "Cargo.lock".into(),
             outcome: Outcome::Insufficient,
             observed: "Cargo.lock was not supplied".into(),
         }];
-        let body = preview(&p, &scan, &session()).unwrap();
+        let draft = Draft {
+            scan,
+            fixture: String::new(),
+            lockfile_used: false,
+        };
+        let body = project(
+            &p,
+            "owner",
+            &[],
+            &session(),
+            "request",
+            Feedback::default(),
+            Some(&draft),
+        )
+        .unwrap();
+        assert!(body.contains("id=\"scan-readiness\""));
         assert_eq!(body.matches("data-rule=").count(), 9);
         assert!(body.contains("Cargo.lock was not supplied"));
         assert!(body.contains("Awaiting HTML"));
         assert!(body.contains("Not applicable under the SRI policy"));
+    }
+
+    #[test]
+    fn preview_feedback_preserves_edits_and_keeps_the_lockfile_private() {
+        use scraper::{Html, Selector};
+
+        let (mut p, scan) = example();
+        p.verified = true;
+        let draft = Draft {
+            scan,
+            fixture: String::new(),
+            lockfile_used: true,
+        };
+        let values = [
+            ("lock", "# private lockfile comment"),
+            ("preview", "on"),
+            ("release", "edited release"),
+            ("target", "https://example.org/private/login"),
+            ("environment", "staging"),
+            ("sri", "on"),
+        ]
+        .into_iter()
+        .map(|(key, value)| (key.to_owned(), value.to_owned()))
+        .collect();
+        for existing in [None, Some(&draft)] {
+            let body = project(
+                &p,
+                "owner",
+                &[],
+                &session(),
+                "request",
+                Feedback {
+                    field: "release",
+                    message: "Enter a valid release",
+                    values: Some(&values),
+                },
+                existing,
+            )
+            .unwrap();
+            assert!(!body.contains("# private lockfile comment"));
+            let html = Html::parse_document(&body);
+            let contains = |selector| {
+                html.select(&Selector::parse(selector).unwrap())
+                    .next()
+                    .is_some()
+            };
+            assert!(contains(
+                "input[name=release][value='edited release'][aria-invalid=true]"
+            ));
+            assert!(contains("#release-error[role=alert]"));
+            assert!(contains(
+                "select[name=environment] option[value=staging][selected]"
+            ));
+            assert!(contains("input[name=sri][checked]"));
+            assert_eq!(
+                contains("input[name=has_preview][value=on]"),
+                existing.is_some()
+            );
+            assert_eq!(
+                contains("input[name=discard_preview_lock]"),
+                existing.is_some()
+            );
+        }
     }
 
     #[test]
@@ -912,7 +734,16 @@ mod tests {
             body: include_str!("../fixtures/evaluation/javascript-vulnerable.html").into(),
         };
         scan.results = crate::web::evaluate(Ok(&response), &scan.policy);
-        let body = report(&p, "viewer", &scan, &[], &[], &session()).unwrap();
+        let body = report::render(
+            &p,
+            "viewer",
+            &scan,
+            &[],
+            &[],
+            &session(),
+            Default::default(),
+        )
+        .unwrap();
         assert!(body.contains("/ 60 standard rules"));
         assert!(body.contains("Extensions</th><td data-label=\"Rules assessed / total\">1 / 1</td><td data-label=\"Automated rules with recorded results\">1</td>"));
         assert!(body.contains("data-rule=\"X03-01\""));
@@ -927,10 +758,33 @@ mod tests {
         p.verified = true;
         scan.results = crate::dependencies::evaluate(None);
         let selector = |expression| Selector::parse(expression).unwrap();
-        let project =
-            project(&p, "owner", &[], &session(), "request", Feedback::default()).unwrap();
-        assert!(project.contains("aria-describedby=\"lock-hint\""));
-        for page in [project, preview(&p, &scan, &session()).unwrap()] {
+        let form = project(
+            &p,
+            "owner",
+            &[],
+            &session(),
+            "request",
+            Feedback::default(),
+            None,
+        )
+        .unwrap();
+        assert!(form.contains("aria-describedby=\"lock-hint\""));
+        let draft = Draft {
+            scan: scan.clone(),
+            fixture: String::new(),
+            lockfile_used: false,
+        };
+        let ready = project(
+            &p,
+            "owner",
+            &[],
+            &session(),
+            "request",
+            Feedback::default(),
+            Some(&draft),
+        )
+        .unwrap();
+        for page in [form, ready] {
             let html = Html::parse_document(&page);
             let rules = |group| {
                 html.select(&selector(group))
@@ -947,13 +801,34 @@ mod tests {
             );
         }
 
-        let body = report(&p, "viewer", &scan, &[], &[], &session()).unwrap();
-        assert_eq!(body.matches("Cargo.lock was not supplied").count(), 2);
+        let body = report::render(
+            &p,
+            "viewer",
+            &scan,
+            &[],
+            &[],
+            &session(),
+            Default::default(),
+        )
+        .unwrap();
+        assert_eq!(body.matches("Cargo.lock was not supplied").count(), 1);
         let html = Html::parse_document(&body);
         assert_eq!(
             html.select(&selector("#results [data-outcome=Insufficient]"))
                 .count(),
             2
+        );
+        let missing: Vec<_> = html
+            .select(&selector(
+                ".missing-input [data-rule][data-outcome=Insufficient]",
+            ))
+            .filter_map(|node| node.attr("data-rule"))
+            .collect();
+        assert_eq!(missing, [VULNERABILITIES, MAINTENANCE]);
+        assert_eq!(
+            html.select(&selector("#results details[data-rule]"))
+                .count(),
+            0
         );
         assert!(!body.contains("data-outcome=\"Passed\""));
         assert!(
@@ -962,8 +837,38 @@ mod tests {
                 .all(|obs| obs.outcome == Outcome::Insufficient)
         );
 
+        let full = report::render(
+            &p,
+            "viewer",
+            &scan,
+            &[],
+            &[],
+            &session(),
+            report::ReportView {
+                full: true,
+                findings_only: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(full.matches("Cargo.lock was not supplied").count(), 2);
+        let full = Html::parse_document(&full);
+        assert_eq!(
+            full.select(&selector("#results details[data-rule][open]"))
+                .count(),
+            2
+        );
+
         scan.results = crate::dependencies::evaluate(Some("invalid lockfile"));
-        let body = report(&p, "viewer", &scan, &[], &[], &session()).unwrap();
+        let body = report::render(
+            &p,
+            "viewer",
+            &scan,
+            &[],
+            &[],
+            &session(),
+            Default::default(),
+        )
+        .unwrap();
         assert!(!body.contains("Skipped: Cargo.lock missing"));
         let html = Html::parse_document(&body);
         assert_eq!(
@@ -983,13 +888,14 @@ mod tests {
         second.environment = "staging".into();
         second.status = "queued".into();
         second.results[0].outcome = Outcome::Passed;
-        let body = report(
+        let body = report::render(
             &p,
             "owner",
             &second,
             &[first.clone(), second.clone()],
             &[],
             &session(),
+            Default::default(),
         )
         .unwrap();
         assert!(body.contains("data-status=\"queued\""));
@@ -997,17 +903,77 @@ mod tests {
         assert!(!body.contains("/s/s2/review"));
 
         second.status = "complete".into();
-        let body = report(
+        let body = report::render(
             &p,
             "reviewer",
             &second,
             &[first, second.clone()],
             &[],
             &session(),
+            Default::default(),
         )
         .unwrap();
         assert!(body.contains("data-change=\"NotComparable\""));
         assert!(!body.contains("data-change=\"VerifiedFixed\""));
         assert!(body.contains("/s/s2/review"));
+    }
+
+    #[test]
+    fn failed_scan_does_not_present_results_or_allow_review() {
+        let (p, mut scan) = example();
+        scan.status = "failed".into();
+        let body =
+            report::render(&p, "owner", &scan, &[], &[], &session(), Default::default()).unwrap();
+        assert!(body.contains("data-status=\"failed\""));
+        assert!(body.contains("Scan failed"));
+        assert!(!body.contains("id=\"results\""));
+        assert!(!body.contains("/s/s1/review"));
+    }
+
+    #[test]
+    fn changed_advisory_data_uses_the_previous_assessed_round() {
+        use scraper::{Html, Selector};
+
+        let (p, mut first) = example();
+        first.results[0].rule = VULNERABILITIES.into();
+        let mut failed = first.clone();
+        failed.id = "failed".into();
+        failed.status = "failed".into();
+        failed.results[0].outcome = Outcome::Passed;
+        let mut latest = first.clone();
+        latest.id = "latest".into();
+        latest.results[0].outcome = Outcome::Passed;
+        latest.provenance.rustsec = Some("b".repeat(64));
+        let history = [first, failed, latest.clone()];
+        let body = report::render(
+            &p,
+            "viewer",
+            &latest,
+            &history,
+            &[],
+            &session(),
+            Default::default(),
+        )
+        .unwrap();
+        let html = Html::parse_document(&body);
+        let exists = |selector| {
+            html.select(&Selector::parse(selector).unwrap())
+                .next()
+                .is_some()
+        };
+        assert!(exists(".report-head a[href='/p/project-1/s/s1']"));
+        assert!(exists("#compare [data-change=AdvisoryChanged]"));
+        assert!(!exists("#compare [data-change=VerifiedFixed]"));
+        assert!(
+            html.select(&Selector::parse(".counts a").unwrap())
+                .any(|n| n
+                    .text()
+                    .collect::<String>()
+                    .contains("Advisory data changed"))
+        );
+        assert!(body.contains("Cargo.lock evaluator version"));
+        assert!(body.contains("Web evaluator version"));
+        assert!(body.contains("RustSec SHA-256") && body.contains(&"b".repeat(64)));
+        assert!(body.contains("Retire.js SHA-256"));
     }
 }

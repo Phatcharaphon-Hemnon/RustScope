@@ -185,50 +185,105 @@ impl Library {
     }
 }
 
-pub(super) fn evaluate(
-    url: &Url,
-    item: &str,
-    location: &str,
-    push: &mut impl FnMut(&str, &str, Outcome, &str),
-) -> bool {
-    let Some(libraries) = SNAPSHOT.as_ref() else {
-        push(
-            RULE,
-            "document",
-            Insufficient,
-            "Retire.js data is unavailable for this scan",
-        );
-        return true;
-    };
-    let path = url.path();
-    let filename = path.rsplit('/').next().unwrap_or_default();
-    let mut recognised = false;
-    for library in libraries {
-        let declared: BTreeSet<_> = library
-            .filename
-            .iter()
-            .map(|pattern| (pattern, filename))
-            .chain(library.uri.iter().map(|pattern| (pattern, path)))
-            .filter_map(|(pattern, input)| Some(pattern.captures(input)?.get(1)?.as_str()))
-            .collect();
-        let ambiguous = declared.len() > 1;
-        for (i, declared) in declared.into_iter().enumerate() {
-            recognised = true;
-            let (mut outcome, mut detail) = library.assess(declared);
-            if ambiguous && outcome == Passed {
-                outcome = Insufficient;
-                detail = format!("{declared} · The same URL declares multiple versions");
+struct Declaration {
+    exact_item: String,
+    outcome: Outcome,
+    detail: String,
+}
+
+#[derive(Default)]
+pub(super) struct Scripts {
+    by_logical_item: BTreeMap<String, Vec<Declaration>>,
+}
+
+impl Scripts {
+    pub(super) fn inspect(&mut self, url: &Url, document: &str, exact_item: &str, location: &str) {
+        let Some(libraries) = SNAPSHOT.as_ref() else {
+            return;
+        };
+        let path = url.path();
+        let filename = path.rsplit('/').next().unwrap_or_default();
+        let filename_offset = path.len() - filename.len();
+        for library in libraries {
+            // Work with the exact capture positions. Other numbers in the URL can identify
+            // a different asset, even when they happen to equal the declared version.
+            let captures: BTreeSet<_> = library
+                .filename
+                .iter()
+                .map(|pattern| (pattern, filename, filename_offset))
+                .chain(library.uri.iter().map(|pattern| (pattern, path, 0)))
+                .filter_map(|(pattern, input, offset)| {
+                    let version = pattern.captures(input)?.get(1)?;
+                    Some((offset + version.start(), offset + version.end()))
+                })
+                .collect();
+            if captures.is_empty() {
+                continue;
             }
-            push(
-                RULE,
-                &format!("{item}/{}/{i}", library.name),
-                outcome,
-                &format!(
-                    "{} · {detail} · {location} · Declared filenames and URLs only",
-                    library.name
-                ),
-            );
+            let mut path_parts = Vec::new();
+            let mut versions = BTreeSet::new();
+            let mut end = 0;
+            for (start, stop) in captures {
+                versions.insert(&path[start..stop]);
+                if start >= end {
+                    path_parts.push(&path[end..start]);
+                }
+                end = end.max(stop);
+            }
+            path_parts.push(&path[end..]);
+            let key = serde_json::to_vec(&(
+                document,
+                url.origin().ascii_serialization(),
+                path_parts,
+                url.query(),
+                &library.name,
+            ))
+            .expect("serialize declared library identity");
+            let item = format!("{}/{}", super::identity("library", &key), library.name);
+            let declarations = self.by_logical_item.entry(item).or_default();
+            for (i, declared) in versions.into_iter().enumerate() {
+                let (outcome, detail) = library.assess(declared);
+                declarations.push(Declaration {
+                    exact_item: format!("{exact_item}/{}/{i}", library.name),
+                    outcome,
+                    detail: format!(
+                        "{} · {detail} · {location} · Declared filenames and URLs only",
+                        library.name
+                    ),
+                });
+            }
         }
     }
-    recognised
+
+    pub(super) fn report(self, push: &mut impl FnMut(&str, &str, Outcome, &str)) {
+        if self.by_logical_item.is_empty() {
+            let reason = if SNAPSHOT.is_none() {
+                "Retire.js data is unavailable for this scan"
+            } else {
+                "No library with an identifiable version was found in HTML script filenames or URLs"
+            };
+            push(RULE, "document", Insufficient, reason);
+        }
+        for (item, declarations) in self.by_logical_item {
+            let ambiguous = declarations.len() > 1;
+            for mut declaration in declarations {
+                if ambiguous {
+                    if declaration.outcome == Passed {
+                        declaration.outcome = Insufficient;
+                    }
+                    declaration.detail.push_str(
+                        " · Multiple declarations match across scans, so a fix cannot be verified",
+                    );
+                    push(
+                        RULE,
+                        &format!("ambiguous/{}", declaration.exact_item),
+                        declaration.outcome,
+                        &declaration.detail,
+                    );
+                } else {
+                    push(RULE, &item, declaration.outcome, &declaration.detail);
+                }
+            }
+        }
+    }
 }

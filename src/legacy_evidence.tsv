@@ -62,6 +62,7 @@ HTML ระบุแหล่งสคริปต์ {location}	The HTML declar
 {declared} · พ้นช่วงที่ได้รับผลกระทบตามประกาศใน Retire.js	{declared} · Outside the affected range in Retire.js
 ไม่มีข้อมูล Retire.js สำหรับการตรวจครั้งนี้	Retire.js data is unavailable for this scan
 {declared} · URL เดียวกันระบุหลายรุ่น	{declared} · The same URL declares multiple versions
+มีหลายรายการที่จับคู่ข้ามรอบได้ จึงยืนยันการแก้ไขไม่ได้	Multiple declarations match across scans, so a fix cannot be verified
 {} · {detail} · {location} · ตรวจเฉพาะชื่อไฟล์และ URL ที่ประกาศ	{} · {detail} · {location} · Declared filenames and URLs only
 พบประกาศช่องโหว่สำหรับรุ่นที่ล็อก {}	An advisory affects the locked version {}
 พบประกาศเลิกดูแลสำหรับรุ่นที่ล็อก {}	An unmaintained advisory covers the locked version {}
