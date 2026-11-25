@@ -1,31 +1,6 @@
 "use strict";
 
 const find = selector => document.querySelector(selector);
-const mode = find('[name="mode"]');
-if (mode) {
-  const base = find('[name="base"]');
-  const upgrade = find('[name="upgrade"]');
-  function showScope() {
-    const live = mode.value === "live";
-    find("#live-fields").hidden = !live;
-    base.required = live;
-    base.disabled = !live;
-    let eligible = false;
-    try {
-      const url = new URL(base.value);
-      eligible = live && url.protocol === "http:" && !url.port && !url.search && !url.hash && !url.username && !url.password
-        && !/[%\\@?#\s]/.test(base.value) && !base.value.split("/").some(part => part === "." || part === "..")
-        && /^\/(?:[A-Za-z0-9_~./-]*)$/.test(url.pathname) && !url.pathname.includes("//");
-    } catch {}
-    upgrade.closest("label").hidden = !eligible;
-    upgrade.disabled = !eligible;
-    if (!eligible) upgrade.checked = false;
-  }
-  mode.addEventListener("change", showScope);
-  base.addEventListener("input", showScope);
-  showScope();
-}
-
 for (const options of document.querySelectorAll(".scan-options")) {
   options.addEventListener("invalid", () => { options.open = true; }, true);
 }
@@ -64,7 +39,10 @@ if (filters) {
   const method = find("#method");
   for (const select of [category, method]) {
     const values = new Set(entries.map(entry => entry.dataset[select.id]));
-    for (const value of values) select.add(new Option(value, value));
+    const labels = {A: "A · Direct evidence", S: "S · Source analysis", E: "E · Manual review", X: "X · Extension"};
+    for (const value of values) {
+      select.add(new Option(select === method ? labels[value] ?? value : value, value));
+    }
   }
   function filter() {
     const query = search.value.trim().toLowerCase();
@@ -86,23 +64,30 @@ if (filters) {
     search.focus();
   });
 }
-const sections = find(".sections");
-sections?.addEventListener("focusin", event => {
-  event.target.scrollIntoView({block: "nearest", inline: "nearest", behavior: "instant"});
-});
-function selectSection() {
-  const links = sections?.querySelectorAll("a");
-  const hash = location.hash || links?.[0]?.hash || "";
+function followFragment() {
+  const hash = location.hash;
+  if (hash === "#create") {
+    const create = find(".create-project");
+    if (create) create.open = true;
+  }
+  const sections = find(".sections");
+  if (sections && !location.search && ["#scan", "#members", "#history"].includes(hash)) {
+    const destination = hash === "#scan"
+      ? sections.querySelector("[data-work-section]")
+      : sections.querySelector(`[href$="?section=${hash.slice(1)}"]`);
+    if (destination && !destination.hasAttribute("aria-current")) location.replace(destination.href);
+  }
+  const links = sections?.querySelectorAll('a[href^="#"]');
   for (const link of links ?? []) {
-    if (link.hash === hash) link.setAttribute("aria-current", "location");
+    if (link.hash === (hash || links[0].hash)) link.setAttribute("aria-current", "location");
     else link.removeAttribute("aria-current");
   }
   const target = document.getElementById(hash.slice(1));
   const rule = target?.closest("details.result");
   if (rule) rule.open = true;
 }
-window.addEventListener("hashchange", selectSection);
-selectSection();
+window.addEventListener("hashchange", followFragment);
+followFragment();
 
 const printButton = find("[data-print]");
 if (printButton) {

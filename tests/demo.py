@@ -12,6 +12,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from uuid import uuid4
 from html.parser import HTMLParser
 
 
@@ -54,7 +55,7 @@ class Browser:
 
 
 def run(binary, state, output=None, rounds_dir=None):
-    env = dict(os.environ, RUSTSCOPE_STATE=str(state), RUSTSCOPE_PORT="0")
+    env = dict(os.environ, RUSTSCOPE_STATE=str(state), RUSTSCOPE_PORT="0", RUSTSCOPE_DEMO="1")
     accounts = {
         name: subprocess.check_output([binary, "account", name], env=env, text=True).strip()
         for name in ("owner", "auditor", "reader")
@@ -109,6 +110,8 @@ def run(binary, state, output=None, rounds_dir=None):
         csrf = tokens["owner"]
         _, home_html = owner.request("/")
         assert 'href="/sample-report.pdf"' in home_html
+        assert 'name="mode"' not in home_html
+        assert home_html.index('name="base"') < home_html.index('name="name"')
         with Browser(origin).http.open(origin + "/sample-report.pdf") as sample:
             assert sample.headers.get_content_type() == "application/pdf"
             assert sample.read() == Path("examples/reports/fixed.pdf").read_bytes()
@@ -116,7 +119,7 @@ def run(binary, state, output=None, rounds_dir=None):
         _, catalog = owner.request("/catalog")
         assert 'data-id="A01-01" data-name="Access matrix"' in catalog
         assert 'data-id="A10-06" data-name="Resource cleanup"' in catalog
-        live = dict(csrf=csrf, mode="live", name="Authorized website", days=7, upgrade="on")
+        live = dict(csrf=csrf, name="Authorized website", upgrade="on")
         _, error_form = owner.request("/projects", live, expected=400)
         assert "Enter a scope URL" in error_form
         assert Page(error_form).value("name") == live["name"]
@@ -124,8 +127,10 @@ def run(binary, state, output=None, rounds_dir=None):
         assert "Use an HTTP or HTTPS URL" in error_form
         live_path, live_page = owner.request("/projects", dict(live, base="https://example.invalid/app"))
         assert "/verify" in live_page and 'name="target"' not in live_page
-        assert live_page.index("/verify") < live_page.index("Scan history")
+        assert "Verify scope" in live_page
         assert live_path.startswith("/p/")
+        owner.request(live_path + "/scan", dict(csrf=csrf, target="https://example.invalid/app"), 403)
+        owner.request("/projects", dict(live, base="https://example.invalid/app", days=31), 400)
         assert "https://example.invalid/app/rustscope-verification.txt" in live_page
         assert "http://example.invalid/" not in live_page
         _, error_form = owner.request("/projects", dict(live, base="http://example.invalid:8080/app"), expected=400)
@@ -139,15 +144,33 @@ def run(binary, state, output=None, rounds_dir=None):
             assert "https://example.invalid" in member_page
             assert "https://example.invalid/app" not in member_page
             assert 'data-copy=' not in member_page
+        assert "_rustscope.example.invalid." in live_page
+        assert "Check DNS TXT" in live_page
+        evidence_path = live_path + "/evidence"
+        _, evidence_form = owner.request(evidence_path)
+        assert "Analyze response headers" in evidence_form
+        reader.request(evidence_path, expected=403)
+        supplied = dict(csrf=csrf, url="https://127.0.0.1/secret-path?token=REMOVE_ME",
+                        status=200, headers="Strict-Transport-Security: max-age=60\nSet-Cookie: REMOVE_ME")
+        _, imported = owner.request(evidence_path, supplied)
+        assert "User-provided evidence" in imported and "Print / Save PDF" in imported
+        assert "HSTS max-age is 60 seconds" in imported
+        assert "REMOVE_ME" not in imported and "secret-path" not in imported
+        owner.request(evidence_path, dict(supplied, csrf="wrong"), 403)
+        owner.request(evidence_path, dict(supplied, headers="a" * 16385), 400)
+        _, still_unverified = owner.request(live_path)
+        assert "Awaiting verification" in still_unverified
+        assert 'name="target"' not in still_unverified
         loopback, _ = owner.request("/projects", dict(live, base="http://127.0.0.1", upgrade=""))
         _, verify_error = owner.request(loopback + "/verify", {"csrf": csrf}, expected=422)
         assert "public IPv4 address" in verify_error
+        _, dns_error = owner.request(loopback + "/verify", {"csrf": csrf, "method": "dns"}, expected=422)
+        assert "DNS TXT verification requires a domain name" in dns_error
         assert "http://127.0.0.1/rustscope-verification.txt" in verify_error
         project, body = owner.request("/projects", dict(csrf=csrf, mode="demo", name="Acceptance", days=1))
-        assert all(f"A{c:02}-{n:02}" in body for c in range(1, 11) for n in range(1, 7))
-        assert body.index('name="target"') < body.index('name="release"') < body.index("Scan history")
-        _, project_html = owner.request(project)
-        assert "Prepare scan" in project_html and "URL checks" in project_html
+        assert 'href="/catalog"' in body and 'class="catalog-entry"' not in body
+        assert 'name="fixture"' not in body and 'name="target"' not in body
+        assert "Scan history" in body
         auditor.request(project, expected=403)
         owner.request(project + "/member", dict(csrf="bad", user="reader", role="viewer"), 403)
         for user, role in (("reader", "viewer"), ("auditor", "reviewer")):
@@ -155,17 +178,44 @@ def run(binary, state, output=None, rounds_dir=None):
         _, viewer_page = reader.request(project)
         assert "Scan history" in viewer_page and 'name="target"' not in viewer_page
         db = sqlite3.connect(state / "rustscope.sqlite")
+        # Exercise the real form after verification without contacting an external site.
+        live_id = live_path.rsplit("/", 1)[-1]
+        db.execute("UPDATE projects SET data=json_set(data, '$.verified', json('true')) WHERE id=?",
+                   (live_id,))
+        db.commit()
+        _, verified_page = owner.request(live_path)
+        verified_form = Page(verified_page)
+        assert verified_form.value("target") == "https://example.invalid/app"
+        assert "Start scan" in verified_page
+        live_scan = dict(csrf=csrf, release="v1", request_id=verified_form.value("request_id"), preview="on")
+        owner.request(live_path + "/scan", dict(live_scan, target="https://example.invalid/outside"), 400)
+        _, live_preview = owner.request(live_path + "/scan", dict(live_scan, target=verified_form.value("target")))
+        assert "Scan readiness" in live_preview and "Cargo.lock was not supplied" in live_preview
+        _, retained = owner.request(live_path + "/scan", dict(
+            live_scan, target=verified_form.value("target"), environment="staging",
+            lock='version = 3', sri="on", hsts_min="300",
+        ))
+        assert Page(retained).value("release") == "v1"
+        assert Page(retained).value("request_id") == live_scan["request_id"]
+        assert ">version = 3</textarea>" in retained and 'value="staging" selected' in retained
+        assert 'name="sri" type="checkbox" checked' in retained
+        assert Page(retained).value("hsts_min") == "300"
+        assert not db.execute("SELECT 1 FROM scans WHERE project=?", (live_id,)).fetchone()
+        _, restricted = reader.request(live_path + "?section=members")
+        assert 'id="members"' not in restricted and 'id="history"' in restricted
+        db.execute("UPDATE projects SET data=json_set(data, '$.expires', 1) WHERE id=?", (live_id,))
+        db.commit()
+        owner.request(live_path + "/scan", dict(live_scan, target=verified_form.value("target")), 403)
         reports = {}
         for fixture, change in (("issue", "New"), ("forbidden", "NotComparable"),
                                 ("persistent", "Persistent"), ("fixed", "VerifiedFixed")):
-            _, project_html = owner.request(project)
             fields = dict(csrf=csrf, release=fixture, target="https://fixture.invalid/login",
                           fixture=fixture, sri="on", download="on", hsts_min=3600,
-                          expected_form="login", request_id=Page(project_html).value("request_id"))
+                          expected_form="login", request_id=uuid4().hex)
             if fixture == "issue":
                 too_large = "é" * 131072 + "a"
                 _, error = owner.request(project + "/scan", dict(fields, lock=too_large), 400)
-                assert "Cargo.lock exceeds 262,144 bytes" in error and too_large in error
+                assert "Cargo.lock exceeds 262,144 bytes" in error and too_large not in error
                 _, preview = owner.request(project + "/scan", dict(fields, preview="on"))
                 assert "A04-02" in preview and "A03-01" in preview
                 assert db.execute("select count(*) from scans").fetchone() == (0,)
@@ -178,7 +228,7 @@ def run(binary, state, output=None, rounds_dir=None):
                 db.execute("DROP TRIGGER hold_claim")
             same, _ = owner.request(project + "/scan", fields)
             assert path == same, "retry created a new scan"
-            for _ in range(100):
+            for _ in range(160):
                 tags = Page(body).tags
                 if any(t.get("data-rule") == "A04-02" and t.get("data-change") == change for t in tags):
                     break
@@ -188,6 +238,8 @@ def run(binary, state, output=None, rounds_dir=None):
                 raise AssertionError(f"expected A04-02 {change} for {fixture}")
             assert "SIMULATED_SECRET" not in body and "@media print" in body
             assert "Extensions" in body and "/ 60 standard rules" in body
+            assert body.index('id="results"') < body.index('id="compare"')
+            assert len([tag for tag in tags if "data-category" in tag]) == 10
             rule = None
             for tag in tags:
                 rule = tag.get("data-rule", rule)
@@ -197,10 +249,12 @@ def run(binary, state, output=None, rounds_dir=None):
                 raise AssertionError(f"expected X03-01 insufficient evidence for {fixture}")
             if fixture == "forbidden":
                 assert "403" in body
-                _, full_report = owner.request(path + "?view=full&lang=th")
+                _, full_report = owner.request(path + "?view=full&show=findings")
                 assert "Assessment report" in full_report
                 assert "Incomplete evidence from HTTP response 403" in full_report
                 assert "Not comparable" in full_report
+                assert 'data-outcome="Insufficient"' in full_report
+                assert "OWASP Top 10:2025 coverage" in full_report
                 assert '<html lang="en">' in full_report
                 assert any(t.get("data-rule") == "A04-02" and t.get("data-change") == change
                            for t in Page(full_report).tags)
@@ -270,6 +324,24 @@ def run(binary, state, output=None, rounds_dir=None):
             assert "Release evidence meets the criteria" in historical_review
             assert records() == originals
         print("Passed scope isolation, CSRF, retry, secret redaction, and append-only review checks.")
+    finally:
+        server.terminate()
+        server.wait(timeout=10)
+
+    # Reopen the existing demo project with the test flag disabled.
+    del env["RUSTSCOPE_DEMO"]
+    server = subprocess.Popen([binary], env=env, stdout=subprocess.PIPE, text=True)
+    try:
+        line = server.stdout.readline()
+        assert line.startswith("RustScope http://127.0.0.1:"), line
+        owner = Browser(line.split()[1])
+        _, home = owner.request("/login", credentials)
+        assert 'name="mode"' not in home
+        csrf = Page(home).value("csrf")
+        owner.request("/projects", dict(csrf=csrf, mode="demo", name="Disabled"), 403)
+        owner.request(project + "/scan", dict(fields, csrf=csrf), 403)
+        _, old_report = owner.request(reports["fixed"] + "?view=full")
+        assert 'data-change="VerifiedFixed"' in old_report
     finally:
         server.terminate()
         server.wait(timeout=10)

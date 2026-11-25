@@ -7,7 +7,7 @@ use crate::{
 };
 use axum::{
     Form,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::{Html, IntoResponse, Redirect, Response},
 };
@@ -33,14 +33,16 @@ pub(super) async fn create(
     Form(f): Form<Fields>,
 ) -> Answer<Response> {
     let s = mutation(&app, &h, &f)?;
+    if !app.demo_enabled && field(&f, "mode") == "demo" {
+        return Err(denied());
+    }
     let project = match project_input(&f) {
         Ok(project) => project,
         Err((error_field, error)) => {
             let form = ui::ProjectForm {
                 name: field(&f, "name"),
                 base: field(&f, "base"),
-                days: field(&f, "days"),
-                live: field(&f, "mode") == "live",
+                days: f.get("days").map_or("7", |value| value.trim()),
                 upgrade: field(&f, "upgrade") == "on",
                 error_field,
                 error,
@@ -57,10 +59,12 @@ fn project_input(f: &Fields) -> Result<Project, (&'static str, &'static str)> {
     let name = field(f, "name");
     let demo = match field(f, "mode") {
         "demo" => true,
-        "live" => false,
-        _ => return Err(("mode", "Choose a project mode")),
+        "" | "live" => false,
+        _ => return Err(("base", "Choose a valid project target")),
     };
-    let days = field(f, "days")
+    let days = f
+        .get("days")
+        .map_or("7", |value| value.trim())
         .parse::<i64>()
         .ok()
         .filter(|days| (1..=30).contains(days))
@@ -105,6 +109,7 @@ fn project_input(f: &Fields) -> Result<Project, (&'static str, &'static str)> {
 pub(super) async fn project(
     State(app): State<Shared>,
     Path(id): Path<String>,
+    Query(query): Query<Fields>,
     h: HeaderMap,
 ) -> Answer<Html<String>> {
     let s = session(&app, &h)?;
@@ -115,7 +120,10 @@ pub(super) async fn project(
         &app.store.scans(&s.user, &id).await?,
         &s,
         &token(),
-        ui::Feedback::default(),
+        ui::Feedback {
+            section: field(&query, "section"),
+            ..Default::default()
+        },
     )?))
 }
 pub(super) async fn owner(app: &App, s: &Session, id: &str) -> Answer<Project> {
@@ -134,8 +142,17 @@ pub(super) async fn verify(
     let s = mutation(&app, &h, &f)?;
     let p = owner(&app, &s, &id).await?;
     if !p.demo {
+        let method = field(&f, "method");
         let result = match Scope::new(&p.base, p.expires).and_then(|s| s.with_upgrade(p.upgrade)) {
-            Ok(scope) => scope.verify(&p.challenge).await,
+            Ok(scope) if method == "dns" => scope.verify_dns(&p.challenge).await,
+            Ok(scope) if method.is_empty() || method == "file" => scope.verify(&p.challenge).await,
+            Ok(_) => {
+                return Ok((
+                    StatusCode::BAD_REQUEST,
+                    "Choose a supported verification method",
+                )
+                    .into_response());
+            }
             Err(error) => Err(error),
         };
         if let Err(reason) = result {
@@ -158,6 +175,17 @@ pub(super) async fn verify(
                 "public IPv4 destination required" => {
                     "The website must be reachable through a public IPv4 address"
                 }
+                "DNS verification requires a domain name" => {
+                    "DNS TXT verification requires a domain name. Use file verification for an IP address."
+                }
+                "DNS resolver unavailable"
+                | "DNS verification timed out"
+                | "DNS TXT record unavailable" => {
+                    "The DNS TXT record could not be read. Check the record name and try again."
+                }
+                "DNS challenge does not match" => {
+                    "The DNS TXT record does not contain the displayed challenge code."
+                }
                 "scope expired" => {
                     "The scope expired. Create a new project to request a new scope."
                 }
@@ -174,7 +202,8 @@ pub(super) async fn verify(
                 ui::Feedback {
                     field: "verification",
                     message,
-                    values: None,
+                    section: "verification",
+                    ..Default::default()
                 },
             )?;
             return Ok((StatusCode::UNPROCESSABLE_ENTITY, Html(html)).into_response());
@@ -191,6 +220,9 @@ pub(super) async fn project_error(
     field_name: &str,
     message: &str,
 ) -> Answer<Response> {
+    if p.demo {
+        return Ok((StatusCode::BAD_REQUEST, message.to_owned()).into_response());
+    }
     let request = f
         .get("request_id")
         .filter(|id| label(id))
@@ -206,6 +238,12 @@ pub(super) async fn project_error(
             field: field_name,
             message,
             values: Some(f),
+            section: if matches!(field_name, "user" | "role") {
+                "members"
+            } else {
+                "scan"
+            },
+            ..Default::default()
         },
     )?;
     Ok((StatusCode::BAD_REQUEST, Html(page)).into_response())
@@ -239,5 +277,5 @@ pub(super) async fn member(
         return project_error(&app, &s, &p, &f, "role", "Choose Viewer or Reviewer").await;
     }
     app.store.member(&s.user, &id, user, role).await?;
-    Ok(Redirect::to(&format!("/p/{id}#members")).into_response())
+    Ok(Redirect::to(&format!("/p/{id}?section=members")).into_response())
 }

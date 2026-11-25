@@ -61,7 +61,6 @@ pub struct ProjectForm<'a> {
     pub name: &'a str,
     pub base: &'a str,
     pub days: &'a str,
-    pub live: bool,
     pub upgrade: bool,
     pub error_field: &'a str,
     pub error: &'a str,
@@ -104,6 +103,8 @@ pub struct Feedback<'a> {
     pub field: &'a str,
     pub message: &'a str,
     pub values: Option<&'a Fields>,
+    pub section: &'a str,
+    pub readiness: Option<&'a Scan>,
 }
 
 impl Feedback<'_> {
@@ -125,19 +126,15 @@ struct ProjectPage<'a> {
     role_label: &'static str,
     scope_url: String,
     challenge_url: String,
+    dns_challenge_name: Option<String>,
     feedback: Feedback<'a>,
     active: bool,
     scans: &'a [Scan],
     session: &'a Session,
     request_id: &'a str,
-    rules: Vec<Rule>,
+    section: &'static str,
+    work_section: &'static str,
     evidence: EvidenceGroups<'a>,
-}
-
-impl ProjectPage<'_> {
-    fn demo_default<'a>(&self, value: &'a str) -> &'a str {
-        if self.p.demo { value } else { "" }
-    }
 }
 
 pub fn project(
@@ -155,7 +152,26 @@ pub fn project(
     } else {
         String::new()
     };
-    let rules = visible_rules();
+    let work_section = if !owner || p.demo || scope.is_none() {
+        ""
+    } else if p.verified {
+        "scan"
+    } else {
+        "verification"
+    };
+    let section = match feedback.section {
+        "history" => "history",
+        "members" if owner => "members",
+        "scan" if work_section == "scan" => "scan",
+        "verification" if work_section == "verification" => "verification",
+        _ if !work_section.is_empty() => work_section,
+        _ => "history",
+    };
+    let evidence = if section == "scan" {
+        evidence_groups(&visible_rules(), feedback.readiness)
+    } else {
+        EvidenceGroups::default()
+    };
     Ok(ProjectPage {
         p,
         owner,
@@ -169,14 +185,52 @@ pub fn project(
         } else {
             safe_url(&p.base)
         },
+        dns_challenge_name: if challenge_url.is_empty() {
+            None
+        } else {
+            scope.as_ref().and_then(Scope::dns_challenge_name)
+        },
         challenge_url,
         feedback,
         active: scope.is_some(),
         scans,
         session,
         request_id,
-        evidence: evidence_groups(&rules, None),
-        rules,
+        evidence,
+        section,
+        work_section,
+    }
+    .render()?)
+}
+
+pub struct ImportedEvidence {
+    pub target: String,
+    pub status: u16,
+    pub observations: Vec<Observation>,
+}
+
+#[derive(Template)]
+#[template(path = "imported-evidence.html")]
+struct ImportedEvidencePage<'a> {
+    project: &'a Project,
+    session: &'a Session,
+    report: Option<ImportedEvidence>,
+    rules: Vec<Rule>,
+    error: &'a str,
+}
+
+pub fn imported_evidence(
+    project: &Project,
+    session: &Session,
+    report: Option<ImportedEvidence>,
+    error: &str,
+) -> anyhow::Result<String> {
+    Ok(ImportedEvidencePage {
+        project,
+        session,
+        report,
+        rules: catalog(),
+        error,
     }
     .render()?)
 }
@@ -196,6 +250,16 @@ struct OutcomeCounts {
     passed: usize,
     review: usize,
     na: usize,
+}
+
+#[derive(Default)]
+struct CategoryCoverage {
+    findings: usize,
+    passed: usize,
+    insufficient: usize,
+    other: usize,
+    without_results: usize,
+    reviews: usize,
 }
 
 struct ChangedItem<'a> {
@@ -230,6 +294,7 @@ struct Report<'a> {
     reasons: &'static [&'static str],
     rules: Vec<Rule>,
     coverage: Vec<Coverage>,
+    categories: BTreeMap<&'static str, CategoryCoverage>,
     assessed_total: usize,
     canonical_total: usize,
     outcome_counts: OutcomeCounts,
@@ -353,6 +418,29 @@ pub fn report_with_view(
     let canonical = coverage.iter().filter(|row| row.method != "X");
     let assessed_total = canonical.clone().map(|row| row.assessed).sum();
     let canonical_total = canonical.map(|row| row.total).sum();
+    let mut categories = BTreeMap::<_, CategoryCoverage>::new();
+    for rule in rules.iter().filter(|rule| rule.method != "X") {
+        let row = categories.entry(rule.category).or_default();
+        let mut has_machine_result = false;
+        for (obs, _) in observations
+            .iter()
+            .filter(|(_, checked)| checked.id == rule.id)
+        {
+            has_machine_result = true;
+            match obs.outcome {
+                Outcome::Finding => row.findings += 1,
+                Outcome::Passed => row.passed += 1,
+                Outcome::Insufficient => row.insufficient += 1,
+                Outcome::Review | Outcome::Na => row.other += 1,
+            }
+        }
+        let decisions = reviews
+            .iter()
+            .filter(|(_, reviewed)| reviewed.id == rule.id)
+            .count();
+        row.reviews += decisions;
+        row.without_results += usize::from(!has_machine_result && decisions == 0);
+    }
     let mut outcome_counts = OutcomeCounts::default();
     let mut severity_counts = BTreeMap::new();
     let mut groups = BTreeMap::new();
@@ -467,6 +555,7 @@ pub fn report_with_view(
         reasons: &REASONS,
         rules,
         coverage,
+        categories,
         assessed_total,
         canonical_total,
         outcome_counts,
@@ -738,7 +827,7 @@ mod tests {
         assert!(!viewer.contains(&p.challenge));
         assert!(!viewer.contains("/verify"));
         assert!(!viewer.contains("/member"));
-        assert!(viewer.contains("A10-06"));
+        assert!(!viewer.contains("catalog-entry\" data-id"));
         let owner = project(&p, "owner", &[], &session(), "request", Feedback::default()).unwrap();
         assert!(owner.contains(&p.challenge));
         assert!(owner.contains("/verify"));
@@ -880,7 +969,7 @@ mod tests {
         assert_eq!(findings.select(&badges).count(), 2);
         assert!(
             findings
-                .select(&Selector::parse("#catalog a[href='/catalog']").unwrap())
+                .select(&Selector::parse(".main-nav a[href='/catalog']").unwrap())
                 .next()
                 .is_some()
         );
@@ -900,6 +989,69 @@ mod tests {
         assert!(body.contains("Cargo.lock was not supplied"));
         assert!(body.contains("Awaiting HTML"));
         assert!(body.contains("Not applicable under the SRI policy"));
+    }
+
+    #[test]
+    fn owasp_coverage_distinguishes_observations_missing_rules_and_reviews() {
+        use scraper::{Html, Selector};
+        let (p, mut scan) = example();
+        let finding = scan.results[0].clone();
+        scan.results.extend([
+            Observation {
+                item: "form/2".into(),
+                ..finding.clone()
+            },
+            Observation {
+                rule: "A04-01".into(),
+                outcome: Outcome::Passed,
+                ..finding.clone()
+            },
+            Observation {
+                rule: "A04-03".into(),
+                outcome: Outcome::Insufficient,
+                ..finding
+            },
+        ]);
+        let reviews = [Review {
+            scan: scan.id.clone(),
+            rule: "A01-01".into(),
+            decision: "Finding".into(),
+            rationale: "Policy evidence".into(),
+            evidence: "Reference".into(),
+            at: scan.at,
+            reviewer: "reviewer".into(),
+        }];
+        let body = report_with_view(
+            &p,
+            "viewer",
+            &scan,
+            &[],
+            &reviews,
+            &session(),
+            ReportView {
+                findings_only: true,
+                full: false,
+            },
+        )
+        .unwrap();
+        let doc = Html::parse_document(&body);
+        let cells = |selector: &str| {
+            doc.select(&Selector::parse(selector).unwrap())
+                .map(|node| node.text().collect::<String>())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            cells("[data-category^=A04] td"),
+            ["2", "1", "1", "0", "3", "0"]
+        );
+        assert_eq!(
+            cells("[data-category^=A01] td"),
+            ["0", "0", "0", "0", "5", "1"]
+        );
+        assert_eq!(
+            cells("[data-category^=A05] td"),
+            ["0", "0", "0", "0", "6", "0"]
+        );
     }
 
     #[test]

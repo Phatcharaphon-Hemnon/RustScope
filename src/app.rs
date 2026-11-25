@@ -1,4 +1,5 @@
 mod accounts;
+mod evidence;
 mod projects;
 mod scans;
 mod worker;
@@ -28,6 +29,7 @@ struct App {
     sessions: Sessions,
     hosts: [String; 2],
     wake: tokio::sync::Notify,
+    demo_enabled: bool,
 }
 type Shared = Arc<App>;
 struct Error(StatusCode, &'static str);
@@ -133,6 +135,7 @@ pub async fn run() -> anyhow::Result<()> {
             format!("localhost:{}", address.port()),
         ],
         wake: Default::default(),
+        demo_enabled: std::env::var("RUSTSCOPE_DEMO").as_deref() == Ok("1"),
     });
     let router = Router::new()
         .route("/", get(home))
@@ -181,6 +184,10 @@ pub async fn run() -> anyhow::Result<()> {
         .route("/p/{id}/member", post(member))
         .route("/p/{id}/verify", post(verify))
         .route("/p/{id}/scan", post(scan))
+        .route(
+            "/p/{id}/evidence",
+            get(evidence::page).post(evidence::analyze),
+        )
         .route("/p/{id}/s/{sid}", get(report))
         .route("/p/{id}/s/{sid}/review", post(review))
         .layer(DefaultBodyLimit::max(1024 * 1024))

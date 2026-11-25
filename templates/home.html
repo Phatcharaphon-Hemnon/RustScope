@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block account %}{% include "account.html" %}{% endblock %}
+{% block account %}{% let navigation = "projects" %}{% include "account.html" %}{% endblock %}
 {% block title %}Projects · RustScope{% endblock %}
 {% block content %}
 <header class="page-head">
@@ -27,30 +27,29 @@
     </table>
     {% endif %}
   </section>
-  <section class="panel" id="create">
-    <h2 class="panel-heading">Create project</h2>
+  <details class="panel create-project"{% if projects.is_empty() || !form.error.is_empty() %} open{% endif %}>
+    <summary class="button">Create project</summary>
+    <div id="create">
     <form action="/projects" method="post" class="stack">
 
       <input type="hidden" name="csrf" value="{{ session.csrf }}">
+      <label>Target URL <input name="base" {% if form.error_field == "base" %}aria-invalid="true" aria-errormessage="base-error"{% endif %} value="{{ form.base }}" type="url" maxlength="2048" placeholder="https://example.org/app" aria-describedby="scope-hint" required></label>{% if form.error_field == "base" %}<p id="base-error" role="alert" tabindex="-1" autofocus>⚠ {{ form.error }}</p>{% endif %}
+      <p id="scope-hint" class="hint">Enter the URL of the path you are authorized to scan</p>
       <div class="field">
         <label>Project name <input name="name" {% if form.error_field == "name" %}aria-invalid="true" aria-errormessage="name-error"{% endif %} value="{{ form.name }}" maxlength="40" aria-describedby="name-hint" required></label>
         {% if form.error_field == "name" %}<p id="name-error" role="alert" tabindex="-1" autofocus>{{ form.error }}</p>{% endif %}
         <p id="name-hint" class="hint">Up to 40 characters</p>
       </div>
-      <label>Mode
-        <select name="mode" {% if form.error_field == "mode" %}aria-invalid="true" aria-errormessage="mode-error"{% endif %}>
-          <option value="demo">Offline demo</option>
-          <option value="live"{% if form.live %} selected{% endif %}>Live</option>
-        </select>
-      </label>{% if form.error_field == "mode" %}<p id="mode-error" role="alert" tabindex="-1" autofocus>⚠ {{ form.error }}</p>{% endif %}
-      <div id="live-fields">
-<label>Scope URL <input name="base" {% if form.error_field == "base" %}aria-invalid="true" aria-errormessage="base-error"{% endif %} value="{{ form.base }}" type="url" maxlength="2048" placeholder="https://example.org/app" aria-describedby="scope-hint"></label>{% if form.error_field == "base" %}<p id="base-error" role="alert" tabindex="-1" autofocus>⚠ {{ form.error }}</p>{% endif %}
-      <p id="scope-hint" class="hint">Enter the URL of the path you are authorized to scan</p>
-      <label class="check"><input name="upgrade" {% if form.error_field == "upgrade" %}aria-invalid="true" aria-errormessage="upgrade-error"{% endif %} type="checkbox" value="on"{% if form.upgrade %} checked{% endif %}> Also authorize HTTPS on the same host and path</label>{% if form.error_field == "upgrade" %}<p id="upgrade-error" role="alert" tabindex="-1" autofocus>⚠ {{ form.error }}</p>{% endif %}</div>
+      <details{% if form.error_field == "upgrade" || form.error_field == "days" %} open{% endif %}>
+        <summary>Scope options</summary>
+      <label class="check"><input name="upgrade" {% if form.error_field == "upgrade" %}aria-invalid="true" aria-errormessage="upgrade-error"{% endif %} type="checkbox" value="on"{% if form.upgrade %} checked{% endif %}> Also authorize HTTPS on the same host and path</label>{% if form.error_field == "upgrade" %}<p id="upgrade-error" role="alert" tabindex="-1" autofocus>⚠ {{ form.error }}</p>{% endif %}
       <label>Scope duration (days) <input name="days" {% if form.error_field == "days" %}aria-invalid="true" aria-errormessage="days-error"{% endif %} type="number" value="{{ form.days }}" min="1" max="30" required></label>{% if form.error_field == "days" %}<p id="days-error" role="alert" tabindex="-1" autofocus>⚠ {{ form.error }}</p>{% endif %}
+      </details>
       <button class="primary">Create project</button>
     </form>
     <p><a href="/sample-report.pdf">View sample report (PDF)</a> · Demo data</p>
-  </section>
+    </div>
+  </details>
+
 </div>
 {% endblock %}

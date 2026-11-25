@@ -3,13 +3,13 @@
 <summary><strong>{{ rule.id }} {{ rule.name }}</strong><span class="severity">Severity: {{ rule.severity }}</span><span>{{ group.summary }}</span></summary>
 <table>
 <thead>
-<tr><th>Item</th><th>Outcome</th><th>Evidence</th></tr>
+<tr><th>Location</th><th>Outcome</th><th>Evidence</th></tr>
 </thead>
 <tbody>{% for (index,obs) in group.observations %}
   {% include "report-result.html" %}
 
 {% endfor %}</tbody>
 </table>
-<dl>{% include "report-guidance.html" %}</dl>
+<dl><dt>OWASP category</dt><dd>{{ rule.category }}</dd>{% include "report-guidance.html" %}</dl>
 {% let full = view.full %}{% include "report-reference.html" %}</details>
 {% else %}<p>{% if view.findings_only %}This scan recorded no findings{% else %}This scan recorded no automated results{% endif %}</p>{% endfor %}

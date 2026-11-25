@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block account %}{% let navigation = "projects" %}{% include "account.html" %}{% endblock %}
+{% block title %}Analyze response headers · RustScope{% endblock %}
+{% block content %}
+<nav class="no-print"><a href="/p/{{ project.id }}">Back to project</a></nav>
+{% if let Some(result) = report %}
+<article class="report-shell">
+<header class="report-head">
+<div><h1>Response header report</h1>
+<p class="subtitle">{{ project.name }} · User-provided evidence</p>
+<p><code>{{ result.target }}</code> · HTTP {{ result.status }}</p></div>
+<div class="no-print report-controls"><button data-print hidden>Print / Save PDF</button><noscript>Use your browser’s Print command to save a PDF.</noscript></div>
+</header>
+<p>RustScope analyzed the supplied headers. Results cover two OWASP A02 checks. Checks outside this evidence remain unassessed.</p>
+{% for observation in result.observations %}
+{% for rule in rules %}{% if rule.id == observation.rule %}
+<section class="panel">
+<h2>{{ rule.id }} {{ rule.name }}</h2>
+<p><strong>{{ observation.outcome.label() }}</strong> · {{ rule.category }}</p>
+<dl>
+<dt>Evidence</dt><dd>{{ observation.observed }}</dd>
+{% include "report-guidance.html" %}
+</dl>
+</section>
+{% endif %}{% endfor %}
+{% endfor %}
+<p class="no-print"><a href="/p/{{ project.id }}/evidence">Analyze another response</a> · Save a PDF to keep this report.</p>
+</article>
+{% else %}
+<section class="panel">
+<h1>Analyze response headers</h1>
+<p>In your browser, open Network → Document → Headers. Enter the final URL, status, and any supported response headers you see.</p>
+{% if !error.is_empty() %}<p class="form-error" role="alert">{{ error }}</p>{% endif %}
+<form action="/p/{{ project.id }}/evidence" method="post" class="stack">
+<input type="hidden" name="csrf" value="{{ session.csrf }}">
+<label>Final URL <input name="url" type="url" maxlength="2048" placeholder="https://example.org/" required></label>
+<label>HTTP status <input name="status" type="number" min="100" max="599" placeholder="200" required></label>
+<label>Response headers <textarea name="headers" rows="5" maxlength="16384" aria-describedby="headers-hint" placeholder="Strict-Transport-Security: max-age=31536000"></textarea></label>
+<p id="headers-hint">Use one header per line. Supported headers are Strict-Transport-Security and X-Content-Type-Options. Leave out cookies, tokens, and other sensitive data.</p>
+<label class="check"><input type="checkbox" name="complete" value="on"> I checked the original response for both supported headers</label>
+<label class="check"><input type="checkbox" name="download" value="on"> The response is a download</label>
+<button>Analyze response headers</button>
+</form>
+</section>
+{% endif %}
+{% endblock %}

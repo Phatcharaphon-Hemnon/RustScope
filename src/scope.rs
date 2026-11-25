@@ -27,6 +27,13 @@ pub struct Scope {
     fixture_peer: Option<std::net::SocketAddr>,
 }
 
+fn txt_matches(parts: &[Box<[u8]>], token: &str) -> bool {
+    parts
+        .iter()
+        .flat_map(|part| part.iter().copied())
+        .eq(token.bytes())
+}
+
 fn parse_resource(input: &str) -> Result<Url, Error> {
     if input.len() > 2048
         || input.bytes().any(|b| b <= 32 || b >= 127)
@@ -152,6 +159,44 @@ impl Scope {
             "{}/rustscope-verification.txt",
             self.base.as_str().trim_end_matches('/')
         )
+    }
+
+    pub fn dns_challenge_name(&self) -> Option<String> {
+        match self.base.host()? {
+            url::Host::Domain(host) if host.trim_end_matches('.').contains('.') => {
+                let name = format!("_rustscope.{}.", host.trim_end_matches('.'));
+                hickory_resolver::proto::rr::Name::from_ascii(&name).ok()?;
+                Some(name)
+            }
+            _ => None,
+        }
+    }
+
+    pub async fn verify_dns(&self, token: &str) -> Result<(), Error> {
+        let resolver = hickory_resolver::TokioResolver::builder_tokio()
+            .map_err(|_| "DNS resolver unavailable")?
+            .build();
+        self.verify_dns_with(&resolver, token).await
+    }
+
+    async fn verify_dns_with(
+        &self,
+        resolver: &hickory_resolver::TokioResolver,
+        token: &str,
+    ) -> Result<(), Error> {
+        self.active()?;
+        let name = self
+            .dns_challenge_name()
+            .ok_or("DNS verification requires a domain name")?;
+        let records = timeout(MAX_TIME, resolver.txt_lookup(name))
+            .await
+            .map_err(|_| "DNS verification timed out")?
+            .map_err(|_| "DNS TXT record unavailable")?;
+        if records.iter().any(|txt| txt_matches(txt.txt_data(), token)) {
+            Ok(())
+        } else {
+            Err("DNS challenge does not match")
+        }
     }
 
     pub async fn verify(&self, token: &str) -> Result<(), Error> {
@@ -296,6 +341,78 @@ impl Scope {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn reads_only_the_project_challenge_from_dns() {
+        use hickory_resolver::{
+            config::{NameServerConfig, ResolverConfig},
+            name_server::TokioConnectionProvider,
+            proto::{
+                op::{Message, MessageType},
+                rr::{RData, Record, RecordType, rdata::TXT},
+                xfer::Protocol,
+            },
+        };
+        let socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let mut config = ResolverConfig::new();
+        config.add_name_server(NameServerConfig::new(
+            socket.local_addr().unwrap(),
+            Protocol::Udp,
+        ));
+        let resolver = hickory_resolver::TokioResolver::builder_with_config(
+            config,
+            TokioConnectionProvider::default(),
+        )
+        .build();
+        let server = tokio::spawn(async move {
+            let mut buffer = [0; 2048];
+            let (length, peer) = socket.recv_from(&mut buffer).await.unwrap();
+            let query = Message::from_vec(&buffer[..length]).unwrap();
+            let question = &query.queries()[0];
+            assert_eq!(question.name().to_ascii(), "_rustscope.app.example.org.");
+            assert_eq!(question.query_type(), RecordType::TXT);
+            let mut reply = Message::new();
+            reply
+                .set_id(query.id())
+                .set_message_type(MessageType::Response)
+                .set_recursion_available(true)
+                .add_query(question.clone())
+                .add_answer(Record::from_rdata(
+                    question.name().clone(),
+                    60,
+                    RData::TXT(TXT::new(vec!["project-".into(), "challenge".into()])),
+                ));
+            socket
+                .send_to(&reply.to_vec().unwrap(), peer)
+                .await
+                .unwrap();
+        });
+        let scope = Scope::new("https://app.example.org/private", i64::MAX).unwrap();
+        assert_eq!(
+            scope.verify_dns_with(&resolver, "project-challenge").await,
+            Ok(())
+        );
+        assert_eq!(
+            scope.verify_dns_with(&resolver, "another-challenge").await,
+            Err("DNS challenge does not match")
+        );
+        server.await.unwrap();
+    }
+
+    #[test]
+    fn dns_challenge_binds_to_the_exact_host_and_record_value() {
+        let scope = Scope::new("https://app.example.org/private", i64::MAX).unwrap();
+        assert_eq!(
+            scope.dns_challenge_name().as_deref(),
+            Some("_rustscope.app.example.org.")
+        );
+        let ip = Scope::new("https://192.0.2.1/", i64::MAX).unwrap();
+        assert!(ip.dns_challenge_name().is_none());
+        let parts = [Box::from(&b"abc"[..]), Box::from(&b"def"[..])];
+        assert!(txt_matches(&parts, "abcdef"));
+        assert!(!txt_matches(&parts, "abc"));
+        assert!(!txt_matches(&parts, "abcdef "));
+    }
 
     #[test]
     fn redirect_scope_and_egress() {

@@ -1,8 +1,8 @@
 {% extends "base.html" %}
-{% block account %}{% include "account.html" %}{% endblock %}
+{% block account %}{% let navigation = "projects" %}{% include "account.html" %}{% endblock %}
 {% block title %}Readiness check · RustScope{% endblock %}
 {% block content %}
-<nav class="audit-nav"><a href="/p/{{ p.id }}#scan">Back to scan form</a></nav>
+<nav class="audit-nav"><a href="/p/{{ p.id }}?section=history">Back to history</a></nav>
 <h1>Scan readiness</h1>
 <p class="subtitle">{{ p.name }} · {{ scan.release }}</p>
 <section class="panel project-scope">
@@ -12,5 +12,5 @@
   </dl>
 
   {% include "scan-evidence.html" %}
-<a href="/p/{{ p.id }}#scan">Back to scan form</a></section>
+<a href="/p/{{ p.id }}?section=history">Back to history</a></section>
 {% endblock %}

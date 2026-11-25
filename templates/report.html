@@ -1,30 +1,38 @@
 {% extends "base.html" %}
-{% block account %}{% include "account.html" %}{% endblock %}
+{% block account %}{% let navigation = "projects" %}{% include "account.html" %}{% endblock %}
 {% block title %}Report {{ scan.release }} · RustScope{% endblock %}
 {% block refresh %}{% if pending %}<meta http-equiv="refresh" content="4">{% endif %}{% endblock %}
 {% block content %}
-<nav class="no-print" aria-label="Breadcrumb"><a href="/">Projects</a> / <a href="/p/{{ p.id }}#history">{{ p.name }}</a> / Report</nav>
+<nav class="no-print" aria-label="Breadcrumb"><a href="/">Projects</a> / <a href="/p/{{ p.id }}?section=history">{{ p.name }}</a> / Report</nav>
 <article class="report-shell" data-status="{{ scan.status }}">
 {% if pending %}
 <section class="panel waiting" role="status" aria-live="polite">
 <h1>{% if scan.status == "running" %}Running{% else %}Queued{% endif %}</h1>
 <p>{{ p.name }} · {{ scan.release }}</p>
-<progress aria-label="Scan in progress"></progress>
 <p class="hint">Results will appear when the scan finishes</p>
 <a href="/p/{{ p.id }}/s/{{ scan.id }}">Check status now</a>
 </section>
 {% else %}
-<p class="print-only running-title">{{ p.name }} · {{ scan.release }}</p>
 <header class="report-head">
 <div>
 <h1><span class="print-only">RustScope / </span>Assessment report</h1>
-<p class="subtitle">{{ p.name }} · {{ scan.release }} · {% if p.demo %}Offline demo{% else %}Live{% endif %} · {{ crate::ui::scan_status(scan.status) }}</p>
-{% if let Some(prior) = previous %}<p>Previous report: <a href="/p/{{ p.id }}/s/{{ prior.id }}">{{ prior.release }}</a></p>{% else %}<p>First scan for this target</p>
+<p class="subtitle">{{ p.name }} · {{ scan.release }} · {% if p.demo %}Offline demo{% else %}Verified URL scan{% endif %} · {{ crate::ui::scan_status(scan.status) }}</p>
+{% if let Some(prior) = previous %}<p><span class="print-only">Previous report: {{ prior.release }}</span><a class="button no-print" href="/p/{{ p.id }}/s/{{ prior.id }}">Previous report · {{ prior.release }}</a></p>{% else %}<p>First scan for this target</p>
 <p>Findings first observed in this scan count as New.</p>{% endif %}
-<p class="print-only">{{ crate::ui::utc_date(scan.at) }} · {{ target }} · Coverage {{ assessed_total }} / {{ canonical_total }} standard rules</p>
+<p>{{ crate::ui::utc_date(scan.at) }} · {{ target }}</p>
 </div>
 <div class="no-print report-controls">{% if view.full && !view.findings_only %}<button data-print hidden>Print</button><noscript>Use your browser’s Print command.</noscript>{% else %}<a class="button" href="?view=full">Print / Save PDF</a>{% endif %}{% if view.full %} <a href="?{% if view.findings_only %}show=findings{% else %}show=all{% endif %}">Compact view</a>{% endif %}</div></header>
-<nav class="sections no-print" aria-label="Report sections"><a href="#summary" aria-current="location">Summary</a><a href="#compare">Changed items</a><a href="#results">Rule results</a><a href="#reviews">Reviewer decisions</a></nav>
+<nav class="sections no-print" aria-label="Report sections"><a href="#results" aria-current="location">Rule results</a><a href="#summary">Summary</a><a href="#compare">Changed items</a><a href="#reviews">Reviewer decisions</a></nav>
+<section class="panel" id="results">
+<div class="section-title">
+<h2>Findings and rule results</h2>
+<nav class="view-switch no-print" aria-label="Rule results view">
+<a class="button" href="?show=all{% if view.full %}&amp;view=full{% endif %}#results"{% if !view.findings_only %} aria-current="true"{% endif %}>All results</a>
+<a class="button" href="?show=findings{% if view.full %}&amp;view=full{% endif %}#results"{% if view.findings_only %} aria-current="true"{% endif %}>Findings only</a>
+</nav></div>
+<p><strong>{{ outcome_counts.findings }}</strong> findings · <strong>{{ outcome_counts.insufficient }}</strong> observations with insufficient evidence</p>
+{% include "report-groups.html" %}
+</section>
 <section class="panel" id="summary">
 <h2>Changes by item</h2>
 <ul class="counts">{% for (status,n,first) in totals %}
@@ -52,11 +60,6 @@
 {% endfor %}</tbody>
 </table>
 {% endif %}</section>
-<section class="panel" id="results">
-<div class="section-title">
-<h2>Rule results</h2><a class="no-print" href="{% if view.findings_only %}?show=all{% else %}?show=findings{% endif %}{% if view.full %}&amp;view=full{% endif %}#results">{% if view.findings_only %}All results{% else %}Findings only{% endif %}</a></div>
-{% include "report-groups.html" %}
-</section>
 <section id="reviews" class="panel">
 <h2>Reviewer decisions</h2>
 {% for (review, rule) in reviews %}
@@ -132,6 +135,19 @@
 </dl>
 </details>
 </details>
+<section class="panel" id="owasp-coverage">
+<h2>OWASP Top 10:2025 coverage</h2>
+<p>Automated results count observations. Reviewer decisions are listed separately. A rule without results has no observation or reviewer decision in this scan.</p>
+<table>
+<thead><tr><th scope="col">Category</th><th scope="col">Findings</th><th scope="col">Passed</th><th scope="col">Insufficient evidence</th><th scope="col">Other outcomes</th><th scope="col">Rules without results</th><th scope="col">Reviewer decisions</th></tr></thead>
+<tbody>
+{% for (category, row) in categories %}
+<tr data-category="{{ category }}"><th scope="row">{{ category }}</th><td data-label="Findings">{{ row.findings }}</td><td data-label="Passed">{{ row.passed }}</td><td data-label="Insufficient evidence">{{ row.insufficient }}</td><td data-label="Other outcomes">{{ row.other }}</td><td data-label="Rules without results">{{ row.without_results }}</td><td data-label="Reviewer decisions">{{ row.reviews }}</td></tr>
+{% endfor %}
+</tbody>
+</table>
+<p>See the breakdown below for extension coverage.</p>
+</section>
 <details class="panel coverage-panel"{% if view.full %} open{% endif %}>
 <summary>Coverage · Assessed {{ assessed_total }} / {{ canonical_total }} standard rules</summary>
 <table>
@@ -143,7 +159,6 @@
 {% endfor %}</tbody>
 </table>
 </details>
-<p id="catalog" class="no-print"><a href="/catalog">Open the standard rule and extension catalog</a></p>
 {% endif %}
 </article>
 {% endblock %}

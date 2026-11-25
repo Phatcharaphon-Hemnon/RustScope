@@ -1,6 +1,6 @@
 <nav class="main-nav" aria-label="Main navigation">
-  <a href="/">Projects</a>
-  <a href="/catalog">Rule catalog</a>
+  <a href="/"{% if navigation == "projects" %} aria-current="page"{% endif %}>Projects</a>
+  <a href="/catalog"{% if navigation == "catalog" %} aria-current="page"{% endif %}>Rule catalog</a>
 </nav>
 <div class="account"><span>{{ session.user }}</span>
 <form method="post" action="/logout"><input type="hidden" name="csrf" value="{{ session.csrf }}"><button class="text-button">Sign out</button></form>

@@ -1,9 +1,6 @@
 {% extends "base.html" %}
-{% block account %}{% include "account.html" %}{% endblock %}
+{% block account %}{% let navigation = "catalog" %}{% include "account.html" %}{% endblock %}
 {% block title %}Rule catalog · RustScope{% endblock %}
 {% block content %}
-<nav aria-label="Breadcrumb"><a href="/">Projects</a> / Rule catalog</nav>
-
-{% let standalone = true %}
 {% include "catalog.html" %}
 {% endblock %}

@@ -11,7 +11,7 @@ docker compose up --build -d
 ```
 
 1. Open **http://localhost:3100** and select **Create account**. Choose a username and a password of at least 12 characters and up to 256 bytes. RustScope signs you in automatically.
-2. Create an **Offline demo** project. Enter a release name, keep the default fixture and policies, then select **Start scan** to open the report. The report refreshes automatically while the scan is queued or running.
+2. Enter a **Target URL** and project name. Publish the verification file with the displayed code, then select **Check verification**. Select **Start scan** and wait for the report. Use **Print / Save PDF** to open the full report.
 
 View logs with `docker compose logs -f`. Stop with `docker compose down`. The named volume retains accounts, the SQLite database, and its encryption key. Run one RustScope instance per volume. After changing the code, rerun `docker compose up --build -d` to rebuild and restart with the same state.
 
@@ -63,9 +63,15 @@ This starts a temporary instance on loopback, creates three accounts, exercises 
 | persistent | The form still declares an HTTP destination | Persistent finding |
 | fixed | The same form and all its submit destinations resolve to HTTPS | Verified fixed |
 
-To repeat the exercise in the browser, create an offline project. On the project screen, keep the demo target, environment and policy defaults. Enter a release name, select the first fixture, preview readiness, return to the form and submit the scan. Refresh the report if it shows a queued or running job. Repeat for the three remaining fixtures in the order above. The comparison links back to the preceding report. Select **Print / Save PDF** to open all results, then **Print** to save an A4 PDF.
+The test runner enables `RUSTSCOPE_DEMO=1` for its temporary instance and submits the demo fixtures directly. The regular web form creates URL projects. Open **View sample report (PDF)** on the Projects page to see an example.
 
 The two sample PDFs show why a 403 cannot close the issue and what evidence finally closed it. Other findings, including the unchanged package risks, have independent outcomes. [403 report](examples/reports/forbidden.pdf) · [Verified fix report](examples/reports/fixed.pdf)
+
+## Analyze pasted response headers
+
+Open a project and select **Analyze response headers**. Enter the final URL, HTTP status, and the supported response headers shown in your browser. RustScope reads the supplied text locally, evaluates supported A02 checks, and labels the result **User-provided evidence**. Save the report using **Print / Save PDF**. Imported evidence does not enter scan history or verify a fix.
+
+For a live scan, verify the project with the challenge file or publish the displayed challenge as a DNS TXT record. DNS verification uses the server’s configured resolver. Both methods authorize only the project’s configured scope and expiry.
 
 ## Live collection and evidence review
 

@@ -30,7 +30,7 @@ pub(super) async fn scan(
     let scope = Scope::new(&p.base, p.expires)
         .and_then(|s| s.with_upgrade(p.upgrade))
         .map_err(|_| denied())?;
-    if !p.verified {
+    if !p.verified || (p.demo && !app.demo_enabled) {
         return Err(denied());
     }
     let form_error = |name, message| project_error(&app, &s, &p, &f, name, message);
@@ -115,7 +115,24 @@ pub(super) async fn scan(
         results,
     };
     if field(&f, "preview") == "on" {
-        return Ok(Html(ui::preview(&p, &scan, &s)?).into_response());
+        let page = if p.demo {
+            ui::preview(&p, &scan, &s)?
+        } else {
+            ui::project(
+                &p,
+                "owner",
+                &[],
+                &s,
+                request,
+                ui::Feedback {
+                    values: Some(&f),
+                    section: "scan",
+                    readiness: Some(&scan),
+                    ..Default::default()
+                },
+            )?
+        };
+        return Ok(Html(page).into_response());
     }
     let actual = app
         .store
@@ -147,7 +164,8 @@ pub(super) async fn report(
     let reviews = app.store.reviews(&s.user, &id, &sid).await?;
     let view = ui::ReportView {
         full: query.view.as_deref() == Some("full"),
-        findings_only: query.show.as_deref() == Some("findings"),
+        findings_only: query.view.as_deref() != Some("full")
+            && query.show.as_deref() == Some("findings"),
     };
     let scan = &history[index];
     let rounds = &history[..=index];
