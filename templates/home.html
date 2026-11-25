@@ -2,23 +2,41 @@
 {% block account %}{% include "account.html" %}{% endblock %}
 {% block title %}Projects · RustScope{% endblock %}
 {% block content %}
-<h1 class="dashboard-heading">Projects</h1>
+<header class="page-head">
+  <h1 class="dashboard-heading">Projects</h1>
+</header>
 <div class="layout home-layout">
-  <section class="cards" aria-label="Project list">{% for p in projects %}
-<article class="panel">
-<h2><a href="/p/{{ p.id }}">{{ p.name }}</a></h2>
-<p>{% if p.demo %}Offline demo{% else %}Live{% endif %} · {% if p.expires <= crate::auth::now() %}Expired{% elif p.verified %}<span class="verified">✓ Verified</span>{% else %}<span class="pending">◷ Awaiting verification</span>{% endif %}</p>
-<details>
-<summary>{% if p.expires <= crate::auth::now() %}Expired{% else %}Expires{% endif %} {{ crate::ui::utc_date(p.expires) }}</summary>Timestamp details · {{ p.expires }}</details>
-{% if !p.demo %}<p>Scope <code>{{ p.base }}</code></p>{% endif %}</article>
-{% else %}<p>No projects yet</p>{% endfor %}</section>
+  <section class="panel" aria-labelledby="project-list">
+    <h2 id="project-list">Project list</h2>
+    {% if projects.is_empty() %}
+    <p class="empty">No projects yet.</p>
+    {% else %}
+    <table class="project-list">
+      <thead><tr><th scope="col">Project</th><th scope="col">Mode</th><th scope="col">Scope status</th><th scope="col">Scope expiry</th></tr></thead>
+      <tbody>
+      {% let now = crate::auth::now() %}
+      {% for p in projects %}
+      <tr>
+        <th scope="row"><a href="/p/{{ p.id }}">{{ p.name }}</a>{% if !p.demo %}<code class="project-scope">{{ p.base }}</code>{% endif %}</th>
+        <td data-label="Mode">{% if p.demo %}Offline demo{% else %}Live{% endif %}</td>
+        <td data-label="Scope status">{% if p.expires <= now %}<span class="pending">Expired</span>{% elif p.verified %}<span class="verified">Verified</span>{% else %}<span class="pending">Awaiting verification</span>{% endif %}</td>
+        <td data-label="Scope expiry"><details><summary>{{ crate::ui::utc_date(p.expires) }}</summary><code>{{ p.expires }}</code> Unix seconds</details></td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </section>
   <section class="panel" id="create">
-    <h2>Create project</h2>
+    <h2 class="panel-heading">Create project</h2>
     <form action="/projects" method="post" class="stack">
 
       <input type="hidden" name="csrf" value="{{ session.csrf }}">
-      <label>Project name <input name="name" {% if form.error_field == "name" %}aria-invalid="true" aria-errormessage="name-error"{% endif %} value="{{ form.name }}" maxlength="40" aria-describedby="name-hint" required></label>{% if form.error_field == "name" %}<p id="name-error" role="alert" tabindex="-1" autofocus>⚠ {{ form.error }}</p>{% endif %}
-      <p id="name-hint" class="hint">Up to 40 characters</p>
+      <div class="field">
+        <label>Project name <input name="name" {% if form.error_field == "name" %}aria-invalid="true" aria-errormessage="name-error"{% endif %} value="{{ form.name }}" maxlength="40" aria-describedby="name-hint" required></label>
+        {% if form.error_field == "name" %}<p id="name-error" role="alert" tabindex="-1" autofocus>{{ form.error }}</p>{% endif %}
+        <p id="name-hint" class="hint">Up to 40 characters</p>
+      </div>
       <label>Mode
         <select name="mode" {% if form.error_field == "mode" %}aria-invalid="true" aria-errormessage="mode-error"{% endif %}>
           <option value="demo">Offline demo</option>

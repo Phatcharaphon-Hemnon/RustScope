@@ -10,7 +10,7 @@
 <header class="project-head" id="overview">
 <div>
 <h1>{{ p.name }}</h1>
-<p>{{ role_label }} · {% if p.demo %}Offline demo{% else %}Live{% endif %} · {% if !active %}<span class="pending">◷ Expired</span>{% elif p.verified %}<span class="verified">✓ Verified</span>{% else %}<span class="pending">◷ Awaiting verification</span>{% endif %}</p>
+<p class="subtitle">{{ role_label }} · {% if p.demo %}Offline demo{% else %}Live{% endif %} · {% if !active %}<span class="pending">Expired</span>{% elif p.verified %}<span class="verified">Verified</span>{% else %}<span class="pending">Awaiting verification</span>{% endif %}</p>
 <details>
 <summary>{% if active %}Expires{% else %}Expired{% endif %} {{ crate::ui::utc_date(p.expires) }} · Timestamp details</summary><code>{{ p.expires }}</code> Unix seconds</details>
 <p>Scope <code>{{ scope_url }}</code></p></div>
@@ -37,7 +37,7 @@
 <h3>Verified</h3>
 <p>Awaiting verification</p></li></ol>
 {% else %}
-<h2>Scan</h2>
+<h2 class="panel-heading">Scan</h2>
 <form action="/p/{{ p.id }}/scan" method="post" class="stack">
 <input type="hidden" name="csrf" value="{{ session.csrf }}"><input type="hidden" name="request_id" value="{{ request_id }}">
 <div class="form-grid">
@@ -50,16 +50,22 @@
 <legend>Release evidence</legend>
 <label>Release <input name="release" {% if feedback.field == "release" %}aria-invalid="true" aria-errormessage="release-error"{% endif %} value="{{ feedback.value("release","") }}" placeholder="v1.0" required></label>{% call error("release") %}
 {% if p.demo %}<label>Demo evidence <select name="fixture" {% if feedback.field == "fixture" %}aria-invalid="true" aria-errormessage="fixture-error"{% endif %}>{% for (key,label) in [("issue","Form submits over HTTP"),("forbidden","Target responds with 403"),("persistent","Form still submits over HTTP"),("fixed","Fixed form submits over HTTPS")] %}<option value="{{ key }}"{% if feedback.value("fixture","issue") == *key %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>{% call error("fixture") %}{% endif %}
-<label>Cargo.lock <textarea name="lock" {% if feedback.field == "lock" %}aria-invalid="true" aria-errormessage="lock-error"{% endif %} rows="4" spellcheck="false" aria-describedby="lock-hint">{{ feedback.value("lock","") }}</textarea></label><output id="lock-count"></output>{% call error("lock") %}<p id="lock-hint" class="hint">{% if p.demo %}Leave blank to use the demo file.{% else %}Optional for URL-only scans.{% endif %}</p></fieldset>
+</fieldset>
 </div>
-<details id="scan-policy" {% if feedback.field == "expected_form" || feedback.field == "hsts_min" %}open{% endif %}>
+<details class="scan-options"{% if feedback.field == "lock" || !feedback.value("lock", "").is_empty() %} open{% endif %}>
+<summary>Cargo.lock evidence</summary>
+<div class="stack">
+<label>Cargo.lock <textarea name="lock" {% if feedback.field == "lock" %}aria-invalid="true" aria-errormessage="lock-error"{% endif %} rows="4" spellcheck="false" aria-describedby="lock-hint">{{ feedback.value("lock","") }}</textarea></label><output id="lock-count"></output>{% call error("lock") %}<p id="lock-hint" class="hint">{% if p.demo %}Leave blank to use the demo file.{% else %}Optional for URL-only scans.{% endif %}</p>
+</div>
+</details>
+<details class="scan-options" id="scan-policy" {% if feedback.field == "expected_form" || feedback.field == "hsts_min" %}open{% endif %}>
 <summary>Policy</summary>
 <div class="form-grid">
 <label><input name="download" type="checkbox"{% if feedback.value("download", self.demo_default("on")) == "on" %} checked{% endif %}> Download target</label>
 <label>Minimum HSTS max-age (seconds) <input name="hsts_min" {% if feedback.field == "hsts_min" %}aria-invalid="true" aria-errormessage="hsts_min-error"{% endif %} type="number" min="0" value="{{ feedback.value("hsts_min", self.demo_default("3600")) }}"></label>{% call error("hsts_min") %}
 <label>Expected form ID <input name="expected_form" {% if feedback.field == "expected_form" %}aria-invalid="true" aria-errormessage="expected_form-error"{% endif %} value="{{ feedback.value("expected_form", self.demo_default("login")) }}"></label>{% call error("expected_form") %}
 <label><input name="sri" type="checkbox"{% if feedback.value("sri", self.demo_default("on")) == "on" %} checked{% endif %}> Require SRI for external scripts</label></div></details>
-<div class="actions"><button class="start-scan">Start scan</button><button name="preview" value="on">Check readiness</button></div>
+<div class="actions"><button class="primary">Start scan</button><button name="preview" value="on">Check readiness</button></div>
 </form>
 <details>
 <summary>Evidence requirements</summary>{% include "scan-evidence.html" %}</details>

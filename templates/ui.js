@@ -26,8 +26,9 @@ if (mode) {
   showScope();
 }
 
-const policy = find("#scan-policy");
-if (policy && matchMedia("(min-width: 961px)").matches) policy.open = true;
+for (const options of document.querySelectorAll(".scan-options")) {
+  options.addEventListener("invalid", () => { options.open = true; }, true);
+}
 
 const lock = find('[name="lock"]');
 if (lock) {
@@ -90,8 +91,9 @@ sections?.addEventListener("focusin", event => {
   event.target.scrollIntoView({block: "nearest", inline: "nearest", behavior: "instant"});
 });
 function selectSection() {
-  const hash = location.hash || "#overview";
-  for (const link of document.querySelectorAll(".sections a")) {
+  const links = sections?.querySelectorAll("a");
+  const hash = location.hash || links?.[0]?.hash || "";
+  for (const link of links ?? []) {
     if (link.hash === hash) link.setAttribute("aria-current", "location");
     else link.removeAttribute("aria-current");
   }
